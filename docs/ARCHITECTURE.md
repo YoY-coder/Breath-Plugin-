@@ -37,7 +37,7 @@ Le son de la piste n'est **jamais** traité par FFT : la FFT ne sert qu'à mesur
 | Framework | JUCE **9.0.5** (dernière version stable), téléchargé automatiquement par CMake |
 | Build | CMake ≥ 3.25 |
 | Format | VST3 uniquement |
-| Windows | Visual Studio 2022 (Community, gratuit) |
+| Windows | Compilé par GitHub Actions (aucun outil à installer) |
 | Mac | GitHub Actions, binaire universel arm64 + x86_64 |
 | Tests | Exécutable de tests C++ (sans DAW), lancé aussi par GitHub Actions |
 | Police | Inter (libre, embarquée dans le plugin) |
