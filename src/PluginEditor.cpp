@@ -21,6 +21,7 @@ BreathAudioProcessorEditor::BreathAudioProcessorEditor (BreathAudioProcessor& p)
     const int w = processor.savedEditorWidth > 0 ? processor.savedEditorWidth : defaultWidth;
     setSize (w, juce::roundToInt (w * (double) defaultHeight / defaultWidth));
 
+    shownTrackInfo = processor.getTrackInfo();
     startTimerHz (10);
 }
 

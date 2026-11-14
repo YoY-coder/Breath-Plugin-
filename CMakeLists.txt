@@ -58,3 +58,13 @@ target_link_libraries(Breath
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+# --- Outil de capture d'écran (développement uniquement) --------------------
+option(BREATH_BUILD_TOOLS "Build developer tools (screenshot)" OFF)
+if(BREATH_BUILD_TOOLS)
+    add_executable(BreathScreenshot tools/Screenshot.cpp)
+    # Réutilise les modules JUCE déjà compilés dans la bibliothèque du plugin.
+    target_include_directories(BreathScreenshot PRIVATE $<TARGET_PROPERTY:Breath,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(BreathScreenshot PRIVATE $<TARGET_PROPERTY:Breath,COMPILE_DEFINITIONS>)
+    target_link_libraries(BreathScreenshot PRIVATE Breath)
+endif()
