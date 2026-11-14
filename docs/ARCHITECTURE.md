@@ -190,6 +190,12 @@ davantage mais rend chaque relation dépendante des autres.)
   (synchronisée sur l'écran, `VBlankAttachment`). Le thread audio ne dessine jamais rien.
 - Vue **Instance** : spectre de la piste + spectres des pistes du dessus (à leur couleur), courbe de
   réduction, réglages de l'instance.
+  **Réglage graphique des relations** directement sur le spectre : des pastilles choisissent la
+  relation éditée (ex. Kick → Basse) ; sa zone de fréquences est surlignée à la couleur de la piste
+  du dessus. Bords gauche/droit = plage de fréquences, ligne bleue = réduction max, ligne pointillée
+  à la couleur de la piste = seuil de déclenchement. Les autres relations restent visibles en
+  pointillés discrets (clic dessus = sélection). Double-clic = valeur par défaut, Alt/Option = réglage
+  fin. Tout est synchronisé avec le panneau de la vue Matrice et passe par l'undo/redo.
 - Vue **Matrice** : liste réordonnable par glisser-déposer, grille des relations avec heatmap,
   panneau de réglages de la relation sélectionnée, snapshots A/B/C, undo/redo, macro, Bypass All.
 - Redimensionnable (coin en bas à droite, ratio conservé), dessin 100 % vectoriel → net à toutes
