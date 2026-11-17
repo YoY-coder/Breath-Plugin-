@@ -1,19 +1,18 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "Common.h"
+#include "hub/BreathHub.h"
+#include "dsp/Analyzer.h"
+#include "dsp/FilterBank.h"
 
-// Infos de piste envoyées par le DAW (nom + couleur), si l'hôte les fournit.
-struct TrackInfo
-{
-    juce::String name;
-    std::optional<juce::Colour> colour;
-};
-
-class BreathAudioProcessor final : public juce::AudioProcessor
+class BreathAudioProcessor final : public juce::AudioProcessor,
+                                   public breath::HubClient,
+                                   private juce::Timer
 {
 public:
     BreathAudioProcessor();
-    ~BreathAudioProcessor() override = default;
+    ~BreathAudioProcessor() override;
 
     // --- Audio ---------------------------------------------------------------
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -26,7 +25,6 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    // --- Infos ---------------------------------------------------------------
     const juce::String getName() const override { return JucePlugin_Name; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
@@ -39,25 +37,96 @@ public:
     const juce::String getProgramName (int) override { return {}; }
     void changeProgramName (int, const juce::String&) override {}
 
-    // --- Sauvegarde dans le projet ------------------------------------------
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // --- Nom / couleur de piste (VST3 track info) ---------------------------
     void updateTrackProperties (const TrackProperties& properties) override;
-    TrackInfo getTrackInfo() const;
 
-    // Taille de l'interface mémorisée dans le projet
+    // --- HubClient -----------------------------------------------------------
+    int   getRank() const override;
+    void  setRankFromHub (int rank) override;
+    float getMacro() const override;
+    void  setMacroFromHub (float v) override;
+    bool  getBypassAll() const override;
+    void  setBypassAllFromHub (bool b) override;
+
+    // --- Accès pour l'interface ----------------------------------------------
+    breath::BreathHub& getHub() noexcept          { return *hub; }
+    int  getSlot() const noexcept                 { return slotIndex; }
+    juce::AudioProcessorValueTreeState& getParams() noexcept { return apvts; }
+    bool isIsolated() const;
+    bool hasOfflineDesync() const;
+    double getSampleRateSafe() const noexcept     { return currentSampleRate.load(); }
+    int  getLatencyInSamples() const noexcept     { return currentLatency.load(); }
+
     int savedEditorWidth = 0;
+    int currentView = 0;          // 0 = Instance, 1 = Matrice
+    int selectedUpper = -1;       // relation éditée (slot de la piste du dessus)
+    int selectedLower = -1;       // relation éditée dans la matrice (slot de la piste du dessous)
 
-    // Infos de diagnostic affichées dans l'interface
-    std::atomic<double> currentSampleRate { 0.0 };
-    std::atomic<int> currentBlockSize { 0 };
-    std::atomic<bool> trackInfoReceived { false };
+    static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
 private:
-    mutable juce::CriticalSection trackInfoLock;
-    TrackInfo trackInfo;
+    void timerCallback() override;
+
+    // Moteur
+    void startSegment (int64_t position);
+    void resetDsp();
+    void controlTick (int64_t s, int syncDelay, bool nonRealtime);
+    bool fetchFrame (int u, int64_t r, bool nonRealtime, breath::FrameData& out);
+    bool readLive (int u, breath::FrameData& out) const;
+    void publishFrame (int64_t sampleIndex);
+
+    juce::AudioProcessorValueTreeState apvts;
+    juce::SharedResourcePointer<breath::BreathHub> hub;
+
+    std::atomic<float>* pPriority = nullptr;
+    std::atomic<float>* pBreath = nullptr;
+    std::atomic<float>* pBypassAll = nullptr;
+    std::atomic<float>* pBypass = nullptr;
+    std::atomic<float>* pDelta = nullptr;
+    std::atomic<float>* pMix = nullptr;
+    std::atomic<float>* pLookahead = nullptr;
+    std::atomic<float>* pStereo = nullptr;
+
+    // Identité
+    int slotIndex = -1;
+    juce::Uuid instanceId;
+    int creationSeq = 0;
+    bool stateLoaded = false;
+    int savedPeers = 0;
+    juce::uint32 loadTime = 0;
+    juce::uint32 createTime = 0;
+    bool rankAssigned = false;
+
+    // État audio
+    std::atomic<double> currentSampleRate { 44100.0 };
+    std::atomic<int> currentLatency { 0 };
+    double sr = 44100.0;
+    breath::Analyzer analyzer;
+    breath::FilterBank bank;
+
+    bool timelineMode = false;
+    int64_t expectedPos = 0, segmentStart = INT64_MIN, liveCounter = 0, liveFrameCount = 0;
+
+    // Valeurs « publiées » dans les trames (lues en début de bloc)
+    float blockRank = 1.0f, blockMacro = 1.0f, blockBypassAll = 0.0f;
+
+    // Relations (une par instance possible au-dessus)
+    std::array<std::array<float, breath::kNumBands>, breath::kMaxInstances> env {};
+    std::array<float, breath::kMaxInstances> weight {}, lastTarget {};
+    std::array<bool, breath::kMaxInstances> weightInit {};
+    std::array<int, breath::kMaxInstances> stallCount {};
+    bool stalledThisBlock = false;
+
+    // Lookahead
+    std::vector<float> delayBuf[2];
+    int delayMask = 0, delayWrite = 0;
+
+    // Lissages
+    float mixS = 1.0f, bypS = 0.0f, deltaS = 0.0f, bypassAllS = 0.0f;
+    float smoothCoef = 0.001f;
+    float bypassAllTarget = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BreathAudioProcessor)
 };
