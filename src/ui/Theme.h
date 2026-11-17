@@ -24,6 +24,9 @@ namespace breath::ui
 
     juce::Font font (float height, Weight w = Weight::regular);
 
+    // Largeur d'un texte dans une police.
+    float textWidth (const juce::Font& f, const juce::String& text);
+
     // Couleur de la heatmap pour une réduction (dB positifs).
     juce::Colour heat (float reductionDb);
 

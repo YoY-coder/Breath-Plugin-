@@ -33,6 +33,11 @@ namespace breath::ui
         return juce::Font (juce::FontOptions (tf).withHeight (height));
     }
 
+    float textWidth (const juce::Font& f, const juce::String& text)
+    {
+        return juce::GlyphArrangement::getStringWidth (f, text);
+    }
+
     juce::Colour heat (float db)
     {
         const float t = juce::jlimit (0.0f, 1.0f, db / 9.0f);
@@ -63,7 +68,11 @@ namespace breath::ui
         f.setExtraKerningFactor (0.08f);
         g.setFont (f);
         g.setColour (colours::text3);
-        g.drawText (text.toUpperCase(), r, j, false);
+        auto up = text.toUpperCase();
+        const char* pairs[][2] = { { "é", "É" }, { "è", "È" }, { "ê", "Ê" }, { "à", "À" }, { "ç", "Ç" }, { "î", "Î" }, { "ô", "Ô" }, { "û", "Û" }, { "ù", "Ù" } };
+        for (auto& pr : pairs)
+            up = up.replace (juce::String::fromUTF8 (pr[0]), juce::String::fromUTF8 (pr[1]));
+        g.drawText (up, r, j, false);
     }
 
     //==========================================================================

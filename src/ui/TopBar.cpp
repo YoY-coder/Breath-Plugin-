@@ -131,7 +131,7 @@ namespace breath::ui
         // Rang (position dans la hiérarchie)
         if (rankShown > 0)
         {
-            const auto txtW = font (14.0f, Weight::semibold).getStringWidthFloat (name.getText()) + 8.0f;
+            const auto txtW = textWidth (font (14.0f, Weight::semibold), name.getText()) + 8.0f;
             auto badge = juce::Rectangle<float> (name.getX() + juce::jmin (txtW, (float) name.getWidth()) + 6.0f,
                                                  (float) getHeight() / 2.0f - 9.0f, 22.0f, 18.0f);
             g.setColour (colours::panel2);

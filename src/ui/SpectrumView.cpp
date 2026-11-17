@@ -138,7 +138,7 @@ namespace breath::ui
     void SpectrumView::drawPill (juce::Graphics& g, juce::Point<float> anchor, const juce::String& text, juce::Colour c, int align) const
     {
         const auto f = font (11.0f, Weight::semibold);
-        const float w = f.getStringWidthFloat (text) + 14.0f;
+        const float w = textWidth (f, text) + 14.0f;
         float x = align < 0 ? anchor.x - w : (align == 0 ? anchor.x - w / 2.0f : anchor.x);
         x = juce::jlimit (2.0f, (float) getWidth() - w - 2.0f, x);
         const auto r = juce::Rectangle<float> (x, anchor.y - 10.0f, w, 20.0f);
@@ -304,7 +304,7 @@ namespace breath::ui
             g.setColour (colours::text2);
             const auto myName = hub.displayName (me);
             g.drawText (myName, juce::Rectangle<float> (x + 14.0f, cy - 10.0f, 200.0f, 20.0f), juce::Justification::centredLeft);
-            x += 14.0f + font (12.0f).getStringWidthFloat (myName) + 18.0f;
+            x += 14.0f + textWidth (font (12.0f), myName) + 18.0f;
 
             if (uppers.empty())
             {
@@ -325,7 +325,7 @@ namespace breath::ui
                     const auto rel = hub.getRelation (u, me);
                     const auto nm = hub.displayName (u);
                     const auto c = hub.displayColour (u);
-                    const float w = font (12.0f).getStringWidthFloat (nm) + 34.0f;
+                    const float w = textWidth (font (12.0f), nm) + 34.0f;
                     if (x + w > (float) getWidth() - 150.0f) break;
                     const auto r = juce::Rectangle<float> (x, cy - 13.0f, w, 26.0f);
 
@@ -407,7 +407,8 @@ namespace breath::ui
             case Target::threshold:  setMouseCursor (juce::MouseCursor::UpDownResizeCursor); break;
             case Target::chip:
             case Target::selectOther: setMouseCursor (juce::MouseCursor::PointingHandCursor); break;
-            case Target::none:       setMouseCursor (juce::MouseCursor::NormalCursor); break;
+            case Target::none:
+            default:                 setMouseCursor (juce::MouseCursor::NormalCursor); break;
         }
     }
 
@@ -445,7 +446,7 @@ namespace breath::ui
             case Target::highEdge:  s.highHz = juce::jlimit (s.lowHz * 1.12f, kMaxFreq, xToFreq (p.x)); break;
             case Target::maxLine:   s.maxReduction = juce::jlimit (0.5f, 24.0f, yToRedDb (p.y)); break;
             case Target::threshold: s.threshold = juce::jlimit (-80.0f, 0.0f, yToSpecDb (p.y)); break;
-            default: break;
+            case Target::none: case Target::selectOther: case Target::chip: default: break;
         }
         hub.setRelation (drag.slot, me, s);
         repaint();

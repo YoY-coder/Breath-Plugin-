@@ -16,7 +16,7 @@ namespace breath::ui
         float y = area.getBottom();
         for (auto& m : msgs)
         {
-            const float w = font (11.0f, Weight::medium).getStringWidthFloat (m) + 30.0f;
+            const float w = textWidth (font (11.0f, Weight::medium), m) + 30.0f;
             auto r = juce::Rectangle<float> (area.getX(), y - 24.0f, w, 22.0f);
             g.setColour (colours::warning.withAlpha (0.14f));
             g.fillRoundedRectangle (r, 7.0f);
@@ -107,7 +107,7 @@ namespace breath::ui
             g.setColour (colours::text);
             g.setFont (font (18.0f, Weight::semibold));
             g.drawText (v, in, juce::Justification::centredLeft);
-            const float w = font (18.0f, Weight::semibold).getStringWidthFloat (v);
+            const float w = textWidth (font (18.0f, Weight::semibold), v);
             g.setColour (colours::text2);
             g.setFont (font (11.0f, Weight::medium));
             g.drawText (unit, in.withTrimmedLeft (w + 3.0f).withTrimmedTop (4.0f), juce::Justification::centredLeft);

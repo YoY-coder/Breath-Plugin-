@@ -21,17 +21,31 @@ namespace breath
         }
 
         // Calcule les niveaux des bandes à partir des derniers échantillons poussés.
-        void compute (float* bandsDb) noexcept;
+        // updateLows : recalcule aussi l'analyse longue (graves) — à appeler à intervalles
+        // réguliers alignés sur la timeline pour rester déterministe.
+        void compute (float* bandsDb, bool updateLows) noexcept;
 
-        int getFftSize() const noexcept { return fftSize; }
+        static constexpr int kLowsEvery = 4;   // analyse des graves toutes les 4 trames
 
     private:
         struct Weight { int bin; float w; };
 
-        int fftOrder = 10, fftSize = 1024, mask = 1023, writePos = 0;
-        std::unique_ptr<juce::dsp::FFT> fft;
-        std::vector<float> history, window, work;
-        std::vector<std::vector<Weight>> bandWeights;
-        float scale = 1.0f;
+        // Deux résolutions : FFT courte (réactive) pour tout le spectre,
+        // FFT 4× plus longue (précise) pour les graves.
+        struct Fft
+        {
+            int order = 10, size = 1024;
+            std::unique_ptr<juce::dsp::FFT> fft;
+            std::vector<float> window, work;
+            std::vector<std::vector<Weight>> weights;
+            float scale = 1.0f;
+            void prepare (int order, double sampleRate);
+            void run (const std::vector<float>& history, int writePos, int mask, float* bandsDb) noexcept;
+        };
+
+        Fft shortFft, longFft;
+        std::vector<float> history;
+        std::array<float, kNumBands> lows {}, blend {};
+        int mask = 4095, writePos = 0;
     };
 }

@@ -1,6 +1,17 @@
 # Breath — Plan d'architecture
 
-> Statut : **proposition à valider** (aucun code écrit pour l'instant).
+> Statut : **implémenté** (étapes 1 à 5). Écarts par rapport au plan initial, décidés pendant le développement :
+> - Analyse sur une grille de **128 échantillons** (gains recalculés tous les 32), alignée sur la timeline.
+> - **Deux FFT** : courte (≈ 21 ms) pour tout le spectre, longue (≈ 85 ms, recalculée tous les 512
+>   échantillons) pour les graves sous ~300 Hz, afin de bien séparer kick et basse.
+> - **Délai de synchro** = plus grand buffer temps réel observé (arrondi à 64), commun à toutes les
+>   instances et sauvegardé dans le projet pour que l'export reste identique.
+> - Chaque instance **vide ses analyses** à chaque nouveau départ de lecture (évite de lire une analyse
+>   périmée d'une lecture précédente pendant un export).
+> - Mode stéréo : **Stéréo / Mid / Side**. « Mid + Side » a été retiré : la détection venant des pistes du
+>   dessus, Mid et Side recevraient la même réduction, ce qui revient exactement au mode Stéréo.
+> - Snapshots : le snapshot actif enregistre automatiquement les modifications (comparaison A/B façon Logic).
+> - Test automatique : **sortie export = sortie temps réel, à l'échantillon près** (écart mesuré : 0).
 
 ## 1. Vue d'ensemble
 

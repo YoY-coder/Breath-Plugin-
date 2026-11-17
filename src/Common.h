@@ -57,9 +57,9 @@ namespace breath
     struct RelationSettings
     {
         bool  enabled     = true;
-        float amount      = 0.6f;    // 0..1 (dB de réduction par dB au-dessus du seuil)
+        float amount      = 0.5f;    // 0..1 (dB de réduction par dB au-dessus du seuil)
         float maxReduction = 6.0f;   // dB (positif)
-        float threshold   = -40.0f;  // dBFS
+        float threshold   = -30.0f;  // dBFS
         float attackMs    = 5.0f;
         float releaseMs   = 120.0f;
         float lowHz       = 20.0f;
@@ -73,7 +73,7 @@ namespace breath
     struct AtomicRelation
     {
         std::atomic<bool>  enabled { true };
-        std::atomic<float> amount { 0.6f }, maxReduction { 6.0f }, threshold { -40.0f },
+        std::atomic<float> amount { 0.5f }, maxReduction { 6.0f }, threshold { -30.0f },
                            attackMs { 5.0f }, releaseMs { 120.0f },
                            lowHz { 20.0f }, highHz { 20000.0f }, resolution { 0.6f };
 

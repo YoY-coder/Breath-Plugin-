@@ -531,7 +531,7 @@ namespace breath::ui
             g.setColour (colours::text);
             g.setFont (font (14.0f, Weight::semibold));
             const auto nm = hub.displayName (s);
-            const float w = juce::jmin (70.0f, font (14.0f, Weight::semibold).getStringWidthFloat (nm) + 2.0f);
+            const float w = juce::jmin (70.0f, textWidth (font (14.0f, Weight::semibold), nm) + 2.0f);
             g.drawText (nm, juce::Rectangle<float> (x, cy - 10.0f, w, 20.0f), juce::Justification::centredLeft, true);
             x += w + 6.0f;
         };

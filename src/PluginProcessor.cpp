@@ -54,8 +54,8 @@ BreathAudioProcessor::BreathAudioProcessor()
     slotIndex = hub->registerInstance (this, instanceId, creationSeq);
     createTime = juce::Time::getMillisecondCounter();
 
-    analyzer.prepare (44100.0);
-    bank.prepare (44100.0);
+    // Préparation par défaut (au cas où l'hôte traiterait avant prepareToPlay).
+    prepareToPlay (44100.0, 512);
 
     startTimer (250);
 }
@@ -135,6 +135,11 @@ void BreathAudioProcessor::prepareToPlay (double sampleRate, int)
 
     timelineMode = false;
     resetDsp();
+    if (slotIndex >= 0)
+    {
+        hub->slot (slotIndex).segmentStart.store (INT64_MIN);
+        hub->slot (slotIndex).clearFrames();
+    }
 }
 
 bool BreathAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -178,6 +183,8 @@ void BreathAudioProcessor::startSegment (int64_t position)
     if (slotIndex >= 0)
     {
         auto& me = hub->slot (slotIndex);
+        me.segmentStart.store (INT64_MIN);
+        me.clearFrames();
         me.segmentStart.store (position);
         me.offlineDesync.store (false);
     }
@@ -187,7 +194,8 @@ void BreathAudioProcessor::startSegment (int64_t position)
 void BreathAudioProcessor::publishFrame (int64_t s)
 {
     FrameData d;
-    analyzer.compute (d.bands);
+    const int64_t frameIndex = floorDiv (s + 1, kHop) - 1;
+    analyzer.compute (d.bands, floorMod (frameIndex, Analyzer::kLowsEvery) == 0);
     d.rank = blockRank;
     d.macro = blockMacro;
     d.bypassAll = blockBypassAll;
@@ -208,7 +216,7 @@ bool BreathAudioProcessor::readLive (int u, FrameData& out) const
     return s >= 0 && f.read (s, INT64_MIN, out);
 }
 
-bool BreathAudioProcessor::fetchFrame (int u, int64_t r, bool nonRealtime, FrameData& out)
+bool BreathAudioProcessor::fetchFrame (int u, int64_t r, bool offline, FrameData& out)
 {
     const int64_t k = floorDiv (r + 1, kHop) - 1;
     if ((k + 1) * kHop <= segmentStart)
@@ -216,7 +224,12 @@ bool BreathAudioProcessor::fetchFrame (int u, int64_t r, bool nonRealtime, Frame
 
     auto& sl = hub->slot (u);
     auto& f = sl.ring[(size_t) floorMod (k, kRingFrames)];
-    if (f.read (k, segmentStart, out))
+    auto readCurrent = [&] (Frame& fr, int64_t idx)
+    {
+        // L'autre instance doit être dans le même segment de lecture que nous.
+        return sl.segmentStart.load (std::memory_order_acquire) == segmentStart && fr.read (idx, segmentStart, out);
+    };
+    if (readCurrent (f, k))
         return true;
 
     auto fallback = [&]
@@ -225,13 +238,13 @@ bool BreathAudioProcessor::fetchFrame (int u, int64_t r, bool nonRealtime, Frame
         {
             const int64_t kk = k - j;
             if ((kk + 1) * kHop <= segmentStart) break;
-            if (sl.ring[(size_t) floorMod (kk, kRingFrames)].read (kk, segmentStart, out))
+            if (readCurrent (sl.ring[(size_t) floorMod (kk, kRingFrames)], kk))
                 return true;
         }
         return false;
     };
 
-    if (! nonRealtime || u == slotIndex)
+    if (! offline || u == slotIndex)
         return fallback();
 
     // Export (rendu hors temps réel) : on attend que l'autre instance ait publié cette trame.
@@ -245,7 +258,7 @@ bool BreathAudioProcessor::fetchFrame (int u, int64_t r, bool nonRealtime, Frame
 
         while (sl.active.load())
         {
-            if (f.read (k, segmentStart, out))
+            if (readCurrent (f, k))
             {
                 stallCount[(size_t) u] = 0;
                 return true;
@@ -271,7 +284,7 @@ bool BreathAudioProcessor::fetchFrame (int u, int64_t r, bool nonRealtime, Frame
     return fallback();
 }
 
-void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool nonRealtime)
+void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
 {
     auto& me = hub->slot (slotIndex);
     const int64_t r = s - syncDelay;
@@ -292,7 +305,7 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool nonRealti
             fr[(size_t) u].bypassAll = blockBypassAll;
             continue;
         }
-        got[(size_t) u] = timelineMode ? fetchFrame (u, r, nonRealtime, fr[(size_t) u])
+        got[(size_t) u] = timelineMode ? fetchFrame (u, r, offline, fr[(size_t) u])
                                        : readLive (u, fr[(size_t) u]);
     }
 
@@ -350,7 +363,7 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool nonRealti
         w += (target - w) * wCoef;
         auto& e = env[(size_t) u];
 
-        if (w < 1.0e-5f && target == 0.0f)
+        if (w < 1.0e-5f && target < 0.5f)
         {
             w = 0.0f;
             e.fill (0.0f);
@@ -372,7 +385,7 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool nonRealti
                 continue;
             const float lvl = got[(size_t) u] ? fr[(size_t) u].bands[b] : kSilenceDb;
             inst[(size_t) b] = juce::jlimit (0.0f, rel.maxReduction, (lvl - rel.threshold) * rel.amount) * mask[(size_t) b];
-            rangePower += std::pow (10.0, lvl / 10.0) * mask[(size_t) b];
+            if (rel.resolution < 1.0f) rangePower += std::exp ((double) lvl * 0.2302585093) * mask[(size_t) b];
             maskSum += mask[(size_t) b];
         }
 
@@ -435,8 +448,8 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         return;
 
     auto& me = hub->slot (slotIndex);
-    const bool nonRealtime = isNonRealtime();
-    if (! nonRealtime)
+    const bool offline = isNonRealtime();
+    if (! offline)
         hub->reportRealtimeBlockSize (n);
     const int syncDelay = hub->getSyncDelay();
 
@@ -486,6 +499,7 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             timelineMode = false;
             segmentStart = INT64_MIN;
             me.segmentStart.store (INT64_MIN);
+            me.clearFrames();
         }
         base = liveCounter;
         liveCounter += n;
@@ -500,7 +514,7 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         const int64_t s = base + i;
 
         if (floorMod (s, kTick) == 0)
-            controlTick (s, syncDelay, nonRealtime);
+            controlTick (s, syncDelay, offline);
 
         const float xL = left[i];
         const float xR = right != nullptr ? right[i] : xL;
@@ -536,18 +550,23 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             wR = bank.process (1, dR);
         }
 
-        mixS += (mixT - mixS) * smoothCoef;
-        bypS += (bypT - bypS) * smoothCoef;
-        deltaS += (deltaT - deltaS) * smoothCoef;
-        bypassAllS += (bypassAllTarget - bypassAllS) * smoothCoef;
+        auto smooth = [this] (float& v, float target)
+        {
+            v += (target - v) * smoothCoef;
+            if (std::abs (target - v) < 1.0e-4f) v = target;   // fin de fondu exacte (inaudible)
+        };
+        smooth (mixS, mixT);
+        smooth (bypS, bypT);
+        smooth (deltaS, deltaT);
+        smooth (bypassAllS, bypassAllTarget);
         const float byp = juce::jmax (bypS, bypassAllS);
 
         const float pL = wL + ((dL - wL) - wL) * deltaS;
         const float pR = wR + ((dR - wR) - wR) * deltaS;
         float oL = dL + (pL - dL) * mixS;
         float oR = dR + (pR - dR) * mixS;
-        oL += (dL - oL) * byp;
-        oR += (dR - oR) * byp;
+        if (byp >= 1.0f) { oL = dL; oR = dR; }   // bypass complet : signal d'origine exact
+        else { oL += (dL - oL) * byp; oR += (dR - oR) * byp; }
 
         left[i] = oL;
         if (right != nullptr)

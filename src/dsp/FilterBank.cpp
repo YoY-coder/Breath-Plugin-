@@ -99,7 +99,7 @@ namespace breath
         numActive = 0;
         for (int b = 0; b < kNumBands; ++b)
         {
-            const bool on = usable[(size_t) b] && g[(size_t) b] > 1.0e-4f;
+            const bool on = usable[(size_t) b] && g[(size_t) b] > 0.005f;   // < 0,005 dB : inaudible, filtre ignoré
 
             if (! on)
             {

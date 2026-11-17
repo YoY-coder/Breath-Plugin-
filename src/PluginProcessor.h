@@ -72,8 +72,8 @@ private:
     // Moteur
     void startSegment (int64_t position);
     void resetDsp();
-    void controlTick (int64_t s, int syncDelay, bool nonRealtime);
-    bool fetchFrame (int u, int64_t r, bool nonRealtime, breath::FrameData& out);
+    void controlTick (int64_t s, int syncDelay, bool offline);
+    bool fetchFrame (int u, int64_t r, bool offline, breath::FrameData& out);
     bool readLive (int u, breath::FrameData& out) const;
     void publishFrame (int64_t sampleIndex);
 

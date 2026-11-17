@@ -38,9 +38,29 @@ juce_add_plugin(Breath
     VST3_CATEGORIES             Fx Dynamics EQ
 )
 
+# Polices (Inter, licence SIL OFL) embarquées dans le plugin
+juce_add_binary_data(BreathAssets
+    HEADER_NAME BreathAssets.h
+    NAMESPACE BreathAssets
+    SOURCES
+        resources/fonts/Inter-Regular.otf
+        resources/fonts/Inter-Medium.otf
+        resources/fonts/Inter-SemiBold.otf
+)
+set_target_properties(BreathAssets PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_sources(Breath PRIVATE
     src/PluginProcessor.cpp
     src/PluginEditor.cpp
+    src/hub/BreathHub.cpp
+    src/dsp/Analyzer.cpp
+    src/dsp/FilterBank.cpp
+    src/ui/Theme.cpp
+    src/ui/Widgets.cpp
+    src/ui/TopBar.cpp
+    src/ui/SpectrumView.cpp
+    src/ui/InstanceView.cpp
+    src/ui/MatrixView.cpp
 )
 
 target_compile_definitions(Breath PUBLIC
@@ -51,6 +71,7 @@ target_compile_definitions(Breath PUBLIC
 
 target_link_libraries(Breath
     PRIVATE
+        BreathAssets
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC
@@ -59,12 +80,20 @@ target_link_libraries(Breath
         juce::juce_recommended_warning_flags
 )
 
-# --- Outil de capture d'écran (développement uniquement) --------------------
-option(BREATH_BUILD_TOOLS "Build developer tools (screenshot)" OFF)
+# --- Outils de développement : tests automatiques et captures d'écran -------
+option(BREATH_BUILD_TOOLS "Build developer tools (tests, screenshot)" OFF)
 if(BREATH_BUILD_TOOLS)
-    add_executable(BreathScreenshot tools/Screenshot.cpp)
-    # Réutilise les modules JUCE déjà compilés dans la bibliothèque du plugin.
-    target_include_directories(BreathScreenshot PRIVATE $<TARGET_PROPERTY:Breath,INCLUDE_DIRECTORIES>)
-    target_compile_definitions(BreathScreenshot PRIVATE $<TARGET_PROPERTY:Breath,COMPILE_DEFINITIONS>)
-    target_link_libraries(BreathScreenshot PRIVATE Breath)
+    # L'outil de capture a besoin d'une boucle de messages (uniquement dans ce build de développement).
+    target_compile_definitions(Breath PUBLIC JUCE_MODAL_LOOPS_PERMITTED=1)
+    foreach(tool BreathTests BreathScreenshot)
+        if(tool STREQUAL "BreathTests")
+            add_executable(${tool} tests/Tests.cpp)
+        else()
+            add_executable(${tool} tools/Screenshot.cpp)
+        endif()
+        # Réutilise les modules JUCE déjà compilés dans la bibliothèque du plugin.
+        target_include_directories(${tool} PRIVATE $<TARGET_PROPERTY:Breath,INCLUDE_DIRECTORIES> src)
+        target_compile_definitions(${tool} PRIVATE $<TARGET_PROPERTY:Breath,COMPILE_DEFINITIONS>)
+        target_link_libraries(${tool} PRIVATE Breath)
+    endforeach()
 endif()

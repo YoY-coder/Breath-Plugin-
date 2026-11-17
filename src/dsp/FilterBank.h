@@ -19,10 +19,10 @@ namespace breath
 
         inline float process (int ch, float x) noexcept
         {
-            auto& st = state[ch];
+            auto& st = state[(size_t) ch];
             for (int i = 0; i < numActive; ++i)
             {
-                const int b = activeList[i];
+                const auto b = (size_t) activeList[(size_t) i];
                 const auto& c = coeffs[b];
                 auto& s = st[b];
                 const float y = c.b0 * x + s.z1;

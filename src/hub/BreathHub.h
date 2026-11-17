@@ -82,6 +82,14 @@ namespace breath
         std::array<std::atomic<float>, kMaxInstances> activityFrom {}; // réduction causée par chaque slot
         std::atomic<bool> offlineDesync { false };
 
+        // Invalide les trames publiées (nouveau départ de lecture).
+        void clearFrames() noexcept
+        {
+            for (auto& f : ring)
+                f.seq.store (-1, std::memory_order_relaxed);
+            std::atomic_thread_fence (std::memory_order_release);
+        }
+
         void resetRing() noexcept
         {
             for (auto& f : ring)
