@@ -47,7 +47,8 @@ Breath apparaît dans *Plug-ins → Breath*. Si vous remplacez une ancienne vers
 - **Pastilles en haut** : les pistes qui creusent celle-ci. Clic = régler cette relation ;
   clic droit = la désactiver ; **« + »** = faire creuser cette piste par une autre.
 - **Directement sur le graphique** (relation sélectionnée) :
-  - bords de la zone colorée = plage de fréquences ;
+  - bords de la zone colorée : glisser **↔ = fréquence**, glisser **↕ = pente** (vers le haut = plus raide,
+    vers le bas = plus douce), comme sur un séparateur de bandes ; la pente s'affiche en dB/oct au survol ;
   - ligne pointillée de couleur = seuil (la source ne déclenche que là où sa courbe dépasse cette ligne) ;
   - **courbe bleue = réduction max**, façonnable comme un EQ :
     **double-clic sur la courbe** = ajouter un point (jusqu'à 8), glisser le point = fréquence / profondeur,
@@ -57,7 +58,8 @@ Breath apparaît dans *Plug-ins → Breath*. Si vous remplacez une ancienne vers
 - **Panneau de droite** : tous les réglages de la relation (Quantité, Réduction max, Seuil, Attaque,
   Release, Plage, Résolution, Suivre la hiérarchie).
 - **En bas** : Dry/Wet, **Make-up** (gain de compensation, + **Auto** qui compense la perte de volume
-  moyenne mesurée), Lookahead, Stéréo / Mid / Side, Delta, Bypass.
+  moyenne mesurée), Lookahead, Stéréo / Mid / Side, **64 ou 128 bandes** (128 = plus fin dans les médiums
+  et les aigus, un peu plus de processeur), Delta, Bypass.
 
 ### Vue Matrice (vue d'ensemble)
 - **Hiérarchie** (à gauche) : glissez-déposez pour changer l'ordre. ★ = instance maîtresse (porte la macro

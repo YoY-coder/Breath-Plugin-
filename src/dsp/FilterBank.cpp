@@ -6,9 +6,9 @@ namespace breath
     namespace
     {
         // Largeur de chaque cloche : 2 intervalles de bande (≈ 0,31 octave).
-        float bellQ()
+        float bellQ (int nb)
         {
-            const float bwOct = 2.0f * std::log2 (kMaxFreq / kMinFreq) / (float) kNumBands;
+            const float bwOct = 2.0f * std::log2 (kMaxFreq / kMinFreq) / (float) nb;
             const float r = std::pow (2.0f, bwOct);
             return std::sqrt (r) / (r - 1.0f);
         }
@@ -24,14 +24,15 @@ namespace breath
         }
     }
 
-    void FilterBank::prepare (double sampleRate)
+    void FilterBank::prepare (double sampleRate, int numBandsToUse)
     {
-        const float q = bellQ();
+        nb = juce::jlimit (8, kNumBands, numBandsToUse);
+        const float q = bellQ (nb);
         const float sr = (float) sampleRate;
 
-        for (int b = 0; b < kNumBands; ++b)
+        for (int b = 0; b < nb; ++b)
         {
-            const float fc = bandCentre (b);
+            const float fc = bandCentreN (b, nb);
             usable[(size_t) b] = fc < 0.45f * sr;
             const float w0 = juce::MathConstants<float>::twoPi * juce::jmin (fc, 0.45f * sr) / sr;
             cosw[(size_t) b] = std::cos (w0);
@@ -39,21 +40,21 @@ namespace breath
         }
 
         // Matrice de recouvrement : réponse (dB) de la cloche j (1 dB) au centre de la bande b.
-        for (int b = 0; b < kNumBands; ++b)
+        for (int b = 0; b < nb; ++b)
         {
-            const float wb = juce::MathConstants<float>::twoPi * juce::jmin (bandCentre (b), 0.49f * sr) / sr;
+            const float wb = juce::MathConstants<float>::twoPi * juce::jmin (bandCentreN (b, nb), 0.49f * sr) / sr;
             for (int d = -kSpread; d <= kSpread; ++d)
             {
                 const int j = b + d;
                 float v = 0.0f;
-                if (j >= 0 && j < kNumBands && usable[(size_t) j])
+                if (j >= 0 && j < nb && usable[(size_t) j])
                     v = -bellResponseDb (cosw[(size_t) j], alpha[(size_t) j], -1.0f, wb);
                 overlap[(size_t) b][(size_t) (d + kSpread)] = v;
             }
         }
 
         overlapSum = 0.0f;
-        for (auto v : overlap[kNumBands / 2])
+        for (auto v : overlap[(size_t) (nb / 2)])
             overlapSum += v;
         overlapSum = juce::jmax (overlapSum, 0.1f);
 
@@ -76,19 +77,19 @@ namespace breath
         // Gains individuels tels que la cascade reproduise la courbe voulue
         // (quelques itérations de correction, gains toujours ≥ 0 dB de réduction).
         std::array<float, kNumBands> g {};
-        for (int b = 0; b < kNumBands; ++b)
+        for (int b = 0; b < nb; ++b)
             g[(size_t) b] = target[b] / overlapSum;
 
         for (int it = 0; it < 3; ++it)
         {
             std::array<float, kNumBands> next {};
-            for (int b = 0; b < kNumBands; ++b)
+            for (int b = 0; b < nb; ++b)
             {
                 float approx = 0.0f;
                 for (int d = -kSpread; d <= kSpread; ++d)
                 {
                     const int j = b + d;
-                    if (j >= 0 && j < kNumBands)
+                    if (j >= 0 && j < nb)
                         approx += overlap[(size_t) b][(size_t) (d + kSpread)] * g[(size_t) j];
                 }
                 next[(size_t) b] = juce::jmax (0.0f, g[(size_t) b] + (target[b] - approx) / overlapSum);
@@ -97,7 +98,7 @@ namespace breath
         }
 
         numActive = 0;
-        for (int b = 0; b < kNumBands; ++b)
+        for (int b = 0; b < nb; ++b)
         {
             const bool on = usable[(size_t) b] && g[(size_t) b] > 0.005f;   // < 0,005 dB : inaudible, filtre ignoré
 

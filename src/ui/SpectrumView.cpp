@@ -192,21 +192,29 @@ namespace breath::ui
 
         const int sel = proc.instUpper;
 
-        // Zones des relations
+        // Zones des relations (bords en fondu selon la pente réglée)
         for (int u : sources)
         {
             const auto rel = hub.getRelation (u, me);
             const auto c = hub.displayColour (u);
-            const float x0 = freqToX (juce::jmin (rel.lowHz, rel.highHz)), x1 = freqToX (juce::jmax (rel.lowHz, rel.highHz));
-            const auto zone = juce::Rectangle<float> (x0, a.getY() - 8.0f, x1 - x0, a.getHeight() + 8.0f);
-            g.setColour (c.withAlpha (u == sel ? 0.05f : 0.03f));
-            g.fillRect (zone);
+            const float alpha = u == sel ? 0.07f : 0.035f;
+            const float top = a.getY() - 8.0f, h = a.getHeight() + 8.0f;
+            // Pondération réelle de la zone (bords en fondu) dessinée en dégradé continu.
+            juce::ColourGradient grad (c.withAlpha (0.0f), a.getX(), 0.0f, c.withAlpha (0.0f), a.getRight(), 0.0f, false);
+            const int stops = 96;
+            for (int i = 1; i < stops; ++i)
+            {
+                const float t = (float) i / (float) stops;
+                grad.addColour (t, c.withAlpha (alpha * rel.rangeWeight (xToFreq (a.getX() + t * a.getWidth()))));
+            }
+            g.setGradientFill (grad);
+            g.fillRect (juce::Rectangle<float> (a.getX(), top, a.getWidth(), h));
             if (u != sel)
             {
                 const float dashes[] = { 3.0f, 4.0f };
                 g.setColour (c.withAlpha (0.35f));
-                for (float x : { x0, x1 })
-                    g.drawDashedLine ({ x, zone.getY(), x, zone.getBottom() }, dashes, 2, 1.0f);
+                for (float x : { freqToX (rel.lowHz), freqToX (rel.highHz) })
+                    g.drawDashedLine ({ x, top, x, top + h }, dashes, 2, 1.0f);
             }
         }
 
@@ -276,6 +284,24 @@ namespace breath::ui
             drawPill (g, { x0 + 6.0f, a.getBottom() - 14.0f }, hzText (rel.lowHz), c.withAlpha (0.9f), 1);
             drawPill (g, { x1 - 6.0f, a.getBottom() - 14.0f }, hzText (rel.highHz), c.withAlpha (0.9f), -1);
 
+            // Pente : visible au survol / pendant le réglage d'un bord.
+            auto slopeInfo = [&] (bool low)
+            {
+                const float w = low ? rel.lowSlope : rel.highSlope;
+                const float f = low ? rel.lowHz : rel.highHz;
+                const float xa = freqToX (f / std::pow (2.0f, w * 0.5f)), xb = freqToX (f * std::pow (2.0f, w * 0.5f));
+                const float d[] = { 2.0f, 3.0f };
+                g.setColour (c.withAlpha (0.6f));
+                g.drawDashedLine ({ xa, a.getY(), xa, a.getBottom() }, d, 2, 1.0f);
+                g.drawDashedLine ({ xb, a.getY(), xb, a.getBottom() }, d, 2, 1.0f);
+                drawPill (g, { low ? x0 : x1, midY + 30.0f },
+                          "pente " + juce::String (juce::roundToInt (RelationSettings::slopeToDbPerOct (w))) + " dB/oct", c, 0);
+            };
+            const bool lowHot  = (hover.t == Target::lowEdge)  || (drag.t == Target::lowEdge);
+            const bool highHot = (hover.t == Target::highEdge) || (drag.t == Target::highEdge);
+            if (lowHot)  slopeInfo (true);
+            if (highHot) slopeInfo (false);
+
             // Seuil
             const float hx = (x0 + x1) / 2.0f;
             const bool roomRight = x1 + 110.0f < a.getRight();
@@ -339,7 +365,7 @@ namespace breath::ui
             {
             g.setFont (font (10.0f));
             g.setColour (colours::text3);
-            g.drawText (juce::String::fromUTF8 ("Double-clic sur la courbe bleue : ajouter un point · molette : largeur · double-clic sur un point : supprimer"),
+            g.drawText (juce::String::fromUTF8 ("Bords : glisser ↔ fréquence, ↕ pente · courbe bleue : double-clic = ajouter un point, molette = largeur"),
                         juce::Rectangle<float> (a.getX() + 12.0f, a.getBottom() - 40.0f, a.getWidth() - 24.0f, 14.0f),
                         juce::Justification::centredLeft);
             }
@@ -559,6 +585,7 @@ namespace breath::ui
         {
             dragStart = hub.getRelation (drag.slot, me);
             dragOrigin = e.position;
+            dragAxis = 0;
             hub.beginEdit();
         }
     }
@@ -575,8 +602,29 @@ namespace breath::ui
 
         switch (drag.t)
         {
-            case Target::lowEdge:   s.lowHz  = juce::jlimit (kMinFreq, s.highHz / 1.12f, xToFreq (p.x)); break;
-            case Target::highEdge:  s.highHz = juce::jlimit (s.lowHz * 1.12f, kMaxFreq, xToFreq (p.x)); break;
+            case Target::lowEdge:
+            case Target::highEdge:
+            {
+                // Comme sur un séparateur de bandes : horizontal = fréquence, vertical = pente.
+                const auto delta = e.position - dragOrigin;
+                if (dragAxis == 0 && delta.getDistanceFromOrigin() > 4.0f)
+                    dragAxis = std::abs (delta.x) >= std::abs (delta.y) ? 1 : 2;
+
+                const bool low = drag.t == Target::lowEdge;
+                if (dragAxis == 1)
+                {
+                    if (low) s.lowHz  = juce::jlimit (kMinFreq, s.highHz / 1.12f, xToFreq (p.x));
+                    else     s.highHz = juce::jlimit (s.lowHz * 1.12f, kMaxFreq, xToFreq (p.x));
+                }
+                else if (dragAxis == 2)
+                {
+                    // Vers le haut = pente plus raide (fondu plus court), vers le bas = plus douce.
+                    const float startW = low ? dragStart.lowSlope : dragStart.highSlope;
+                    const float w = juce::jlimit (0.05f, 4.0f, startW * std::pow (2.0f, (p.y - dragOrigin.y) / 40.0f));
+                    (low ? s.lowSlope : s.highSlope) = w;
+                }
+                break;
+            }
             case Target::maxLine:   s.maxReduction = juce::jlimit (0.5f, 24.0f, dragStart.maxReduction + yToRedDb (p.y) - yToRedDb (dragOrigin.y)); break;
             case Target::threshold: s.threshold = juce::jlimit (-80.0f, 0.0f, yToSpecDb (p.y)); break;
             case Target::node:
@@ -638,8 +686,8 @@ namespace breath::ui
             n.gain = 0.0f;
             s.nodes[(size_t) s.numNodes++] = n;
         }
-        else if (h.t == Target::lowEdge)   s.lowHz = defaults.lowHz;
-        else if (h.t == Target::highEdge)  s.highHz = defaults.highHz;
+        else if (h.t == Target::lowEdge)   { s.lowHz = defaults.lowHz;   s.lowSlope = defaults.lowSlope; }
+        else if (h.t == Target::highEdge)  { s.highHz = defaults.highHz; s.highSlope = defaults.highSlope; }
         else if (h.t == Target::threshold) s.threshold = defaults.threshold;
         else if (h.t == Target::none && graphArea().contains (e.position)
                  && e.position.x >= freqToX (s.lowHz) && e.position.x <= freqToX (s.highHz)

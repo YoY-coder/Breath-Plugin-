@@ -30,7 +30,7 @@ namespace breath::ui
         juce::Slider mix, makeup, lookahead;
         juce::AudioProcessorValueTreeState::SliderAttachment mixAtt, makeupAtt, lookAtt;
         ParamSwitch autoMakeup;
-        ParamSegmented stereo;
+        ParamSegmented stereo, bands;
         ParamSwitch delta, bypass;
 
         std::array<juce::Rectangle<float>, 5> cards;

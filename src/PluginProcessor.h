@@ -49,6 +49,11 @@ public:
     void  setMacroFromHub (float v) override;
     bool  getBypassAll() const override;
     void  setBypassAllFromHub (bool b) override;
+    int   getFilterBands() const override { return filterBandsWanted(); }
+    int   filterBandsWanted() const noexcept;
+    void  prepareBandTables();
+    std::array<float, 64> bandOct64 {};
+    std::array<float, 128> bandOct128 {};
 
     // --- Accès pour l'interface ----------------------------------------------
     breath::BreathHub& getHub() noexcept          { return *hub; }
@@ -92,6 +97,7 @@ private:
     std::atomic<float>* pStereo = nullptr;
     std::atomic<float>* pMakeup = nullptr;
     std::atomic<float>* pAutoMakeup = nullptr;
+    std::atomic<float>* pBands = nullptr;
 
     // Identité
     int slotIndex = -1;

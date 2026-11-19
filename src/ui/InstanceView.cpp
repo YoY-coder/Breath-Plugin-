@@ -35,6 +35,7 @@ namespace breath::ui
           lookAtt (p.getParams(), "lookahead", lookahead),
           autoMakeup (p.getParams(), "autoMakeup", "Auto"),
           stereo (*p.getParams().getParameter ("stereoMode"), { juce::String::fromUTF8 ("Stéréo"), "Mid", "Side" }),
+          bands (*p.getParams().getParameter ("bands"), { "64 bandes", "128 bandes" }),
           delta (p.getParams(), "delta", juce::String::fromUTF8 ("Delta")),
           bypass (p.getParams(), "bypass", "Bypass")
     {
@@ -58,6 +59,10 @@ namespace breath::ui
                                                       "La latence est déclarée au DAW (compensation automatique). 0 = aucune latence."));
         delta.setTooltip (juce::String::fromUTF8 ("Écouter uniquement ce que Breath retire."));
         stereo.fontSize = 11.0f;
+        bands.fontSize = 11.0f;
+        bands.setTooltip (juce::String::fromUTF8 ("Résolution maximale du filtrage de cette piste : 128 bandes = plus fin dans les médiums et les aigus, "
+                                                  "un peu plus de processeur."));
+        addAndMakeVisible (bands);
         addAndMakeVisible (autoMakeup);
         addAndMakeVisible (stereo);
         addAndMakeVisible (delta);
@@ -103,7 +108,10 @@ namespace breath::ui
         makeup.setBounds (inner (cards[1]).removeFromBottom (18.0f).toNearestInt().expanded (6, 0));
         autoMakeup.setBounds (inner (cards[1]).removeFromTop (16.0f).removeFromRight (78.0f).toNearestInt().expanded (0, 4));
         lookahead.setBounds (inner (cards[2]).removeFromBottom (18.0f).toNearestInt().expanded (6, 0));
-        stereo.setBounds (inner (cards[3]).withTrimmedTop (26.0f).withSizeKeepingCentre (inner (cards[3]).getWidth(), 28.0f).toNearestInt());
+        auto sc = inner (cards[3]).withTrimmedTop (18.0f);
+        stereo.setBounds (sc.removeFromTop (26.0f).toNearestInt());
+        sc.removeFromTop (6.0f);
+        bands.setBounds (sc.removeFromTop (26.0f).toNearestInt());
         auto ec = inner (cards[4]).withTrimmedTop (18.0f);
         delta.setBounds (ec.removeFromTop (26.0f).toNearestInt());
         bypass.setBounds (ec.removeFromTop (26.0f).toNearestInt());
@@ -118,7 +126,7 @@ namespace breath::ui
         {
             drawCard (g, cards[(size_t) i]);
             auto in = cards[(size_t) i].reduced (14.0f, 12.0f);
-            const juce::String t = i == 3 ? juce::String::fromUTF8 ("Stéréo") : (i == 4 ? juce::String::fromUTF8 ("Écoute") : juce::String (titles[i]));
+            const juce::String t = i == 3 ? juce::String::fromUTF8 ("Stéréo · résolution") : (i == 4 ? juce::String::fromUTF8 ("Écoute") : juce::String (titles[i]));
             drawCaption (g, t, in.removeFromTop (14.0f));
         }
 

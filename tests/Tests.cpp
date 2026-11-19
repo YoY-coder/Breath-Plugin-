@@ -214,8 +214,11 @@ int main()
         s.lowHz = 30.0f; s.highHz = 250.0f; s.resolution = 0.8f;
         s.numNodes = 1;
         s.nodes[0] = { 120.0f, -3.0f, 1.0f };     // point de façonnage : protège un peu 120 Hz
+        s.lowSlope = 0.1f; s.highSlope = 1.5f;    // pentes : raide en bas, douce en haut
         hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), s);
     }
+    // La voix travaille en 128 bandes (doit aussi être identique à l'export).
+    rig[2].getParams().getParameter ("bands")->setValueNotifyingHost (1.0f);
     // Make-up automatique sur la basse (doit lui aussi être identique à l'export).
     rig[1].getParams().getParameter ("autoMakeup")->setValueNotifyingHost (1.0f);
     // Lookahead de 6 ms sur la basse (latence + compensation).
@@ -373,27 +376,36 @@ int main()
                     hub.setRelation (many[(size_t) a]->getSlot(), many[(size_t) b]->getSlot(), r);
                 }
 
-        const int seconds = 10, n = 256;
-        juce::AudioBuffer<float> buf (2, n);
-        juce::MidiBuffer m;
-        uint32_t seed = 1;
-        const double t0 = juce::Time::getMillisecondCounterHiRes();
-        for (int64_t pos = 0; pos < (int64_t) kSr * seconds; pos += n)
-            for (int i = 0; i < 12; ++i)
-            {
-                for (int k = 0; k < n; ++k)
-                    for (int c = 0; c < 2; ++c)
-                    {
-                        seed = seed * 1664525u + 1013904223u;
-                        buf.setSample (c, k, 0.3f * ((float) ((seed >> 8) & 0xffff) / 32768.0f - 1.0f));
-                    }
-                heads[(size_t) i].time = pos;
-                many[(size_t) i]->processBlock (buf, m);
-            }
-        const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
-        const double load = ms / (seconds * 1000.0) * 100.0;
-        std::printf ("        12 instances, 10 s d'audio : %.0f ms de calcul -> %.1f %% d'un coeur (%.2f %% par instance)\n", ms, load, load / 12.0);
-        check (load < 50.0, "Charge processeur raisonnable avec 12 instances (pire cas)");
+        auto bench = [&] (int bandsChoice)
+        {
+            for (auto& pr : many)
+                pr->getParams().getParameter ("bands")->setValueNotifyingHost ((float) bandsChoice);
+            const int seconds = 10, n = 256;
+            juce::AudioBuffer<float> buf (2, n);
+            juce::MidiBuffer m;
+            uint32_t seed = 1;
+            const double t0 = juce::Time::getMillisecondCounterHiRes();
+            for (int64_t pos = 0; pos < (int64_t) kSr * seconds; pos += n)
+                for (int i = 0; i < 12; ++i)
+                {
+                    for (int k = 0; k < n; ++k)
+                        for (int c = 0; c < 2; ++c)
+                        {
+                            seed = seed * 1664525u + 1013904223u;
+                            buf.setSample (c, k, 0.3f * ((float) ((seed >> 8) & 0xffff) / 32768.0f - 1.0f));
+                        }
+                    heads[(size_t) i].time = pos;
+                    many[(size_t) i]->processBlock (buf, m);
+                }
+            const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
+            return ms / (seconds * 1000.0) * 100.0;
+        };
+        const double load = bench (0);
+        std::printf ("        12 instances, 64 bandes  : %.1f %% d'un coeur (%.2f %% par instance)\n", load, load / 12.0);
+        const double load128 = bench (1);
+        std::printf ("        12 instances, 128 bandes : %.1f %% d'un coeur (%.2f %% par instance)\n", load128, load128 / 12.0);
+        check (load < 50.0, "Charge processeur raisonnable avec 12 instances (pire cas, 64 bandes)");
+        check (load128 < 90.0, "Charge processeur acceptable avec 12 instances (pire cas, 128 bandes)");
     }
 
     std::printf ("\n%s (%d echec(s))\n", failures == 0 ? "TOUS LES TESTS PASSENT" : "DES TESTS ECHOUENT", failures);

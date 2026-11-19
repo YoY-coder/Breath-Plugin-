@@ -25,6 +25,8 @@ namespace breath
             t.setProperty ("high", r.highHz, nullptr);
             t.setProperty ("resolution", r.resolution, nullptr);
             t.setProperty ("follow", r.followOrder, nullptr);
+            t.setProperty ("lowSlope", r.lowSlope, nullptr);
+            t.setProperty ("highSlope", r.highSlope, nullptr);
             for (int i = 0; i < r.numNodes; ++i)
             {
                 juce::ValueTree n ("Node");
@@ -49,6 +51,8 @@ namespace breath
             r.highHz       = t.getProperty ("high", r.highHz);
             r.resolution   = t.getProperty ("resolution", r.resolution);
             r.followOrder  = t.getProperty ("follow", r.followOrder);
+            r.lowSlope     = t.getProperty ("lowSlope", r.lowSlope);
+            r.highSlope    = t.getProperty ("highSlope", r.highSlope);
             for (const auto& n : t)
                 if (n.hasType ("Node") && r.numNodes < kMaxNodes)
                     r.nodes[(size_t) r.numNodes++] = { (float) n["f"], (float) n["g"], (float) n.getProperty ("w", 1.0f) };

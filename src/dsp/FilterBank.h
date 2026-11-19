@@ -11,10 +11,12 @@ namespace breath
     public:
         static constexpr int kMaxChannels = 2;
 
-        void prepare (double sampleRate);
+        // numBands : 64 ou 128 cloches réparties de 20 Hz à 20 kHz.
+        void prepare (double sampleRate, int numBands);
+        int  getNumBands() const noexcept { return nb; }
         void reset() noexcept;
 
-        // reductionDb : réduction souhaitée par bande (dB positifs). Calcule les coefficients.
+        // reductionDb : réduction souhaitée pour chacune des getNumBands() bandes (dB positifs).
         void setReductions (const float* reductionDb) noexcept;
 
         inline float process (int ch, float x) noexcept
@@ -44,6 +46,7 @@ namespace breath
         std::array<bool, kNumBands> isActive {};
         std::array<int, kNumBands> activeList {};
         int numActive = 0;
+        int nb = 64;
 
         // Recouvrement des cloches (réponse en dB d'une cloche de 1 dB aux bandes voisines),
         // utilisé pour que la cascade suive précisément la courbe voulue.

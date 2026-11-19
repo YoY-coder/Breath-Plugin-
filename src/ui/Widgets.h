@@ -6,7 +6,7 @@
 namespace breath::ui
 {
     // Contrôle segmenté façon macOS (« Instance | Matrice », « Stéréo | Mid | Side »).
-    class Segmented : public juce::Component
+    class Segmented : public juce::Component, public juce::SettableTooltipClient
     {
     public:
         explicit Segmented (juce::StringArray items);

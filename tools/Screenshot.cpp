@@ -71,6 +71,7 @@ int main (int argc, char** argv)
         hub.setRelation (procs[0]->getSlot(), procs[1]->getSlot(), s);
         s.numNodes = 1;
         s.nodes[0] = { 110.0f, -3.5f, 0.8f };
+        s.lowSlope = 0.15f; s.highSlope = 1.2f;
         hub.setRelation (procs[0]->getSlot(), procs[1]->getSlot(), s);
         auto v = hub.getRelation (procs[2]->getSlot(), procs[1]->getSlot());
         v.lowHz = 300.0f; v.highHz = 3000.0f; v.followOrder = false; v.threshold = -45.0f;

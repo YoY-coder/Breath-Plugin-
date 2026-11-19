@@ -58,5 +58,6 @@ namespace breath::ui
         Hit drag, hover;
         RelationSettings dragStart;
         juce::Point<float> dragOrigin;
+        int dragAxis = 0;   // bords : 0 = indécis, 1 = fréquence, 2 = pente
     };
 }

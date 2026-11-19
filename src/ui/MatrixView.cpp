@@ -456,7 +456,9 @@ namespace breath::ui
                     const double r = resolution.getValue();
                     if (r < 0.03) return juce::String ("Large bande");
                     const double sigma = 0.5 * (std::pow (2.0, (1.0 - r) * 6.0) - 1.0);
-                    return juce::String::fromUTF8 ("≈ ") + juce::String (juce::jlimit (2, kNumBands, juce::roundToInt (kNumBands / (1.0 + 2.0 * sigma)))) + " bandes";
+                    const int t = target();
+                    const int nb = hub.isActive (t) && hub.info (t).client != nullptr ? hub.info (t).client->getFilterBands() : 64;
+                    return juce::String::fromUTF8 ("≈ ") + juce::String (juce::jlimit (2, nb, juce::roundToInt (64.0 / (1.0 + 2.0 * sigma) * nb / 64.0))) + " bandes";
                 } },
         };
 

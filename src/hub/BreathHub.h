@@ -20,6 +20,7 @@ namespace breath
         virtual void  setMacroFromHub (float v) = 0;
         virtual bool  getBypassAll() const = 0;
         virtual void  setBypassAllFromHub (bool b) = 0;
+        virtual int   getFilterBands() const { return 64; }   // résolution de filtrage (64 ou 128)
     };
 
     //==========================================================================
