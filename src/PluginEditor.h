@@ -37,6 +37,7 @@ private:
     juce::TooltipWindow tooltips { this, 700 };
     juce::VBlankAttachment vblank;
     int frame = 0;
+    bool ready = false;   // taille initiale appliquée
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BreathAudioProcessorEditor)
 };

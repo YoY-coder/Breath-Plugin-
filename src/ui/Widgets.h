@@ -62,7 +62,7 @@ namespace breath::ui
     };
 
     // Interrupteur avec libellé à gauche, relié à un paramètre booléen.
-    class ParamSwitch : public juce::Component
+    class ParamSwitch : public juce::Component, public juce::SettableTooltipClient
     {
     public:
         ParamSwitch (juce::AudioProcessorValueTreeState& s, const juce::String& paramId, const juce::String& label);

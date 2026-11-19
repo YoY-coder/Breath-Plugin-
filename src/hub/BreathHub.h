@@ -150,6 +150,11 @@ namespace breath
         void reorder (const std::vector<int>& slotsInOrder);  // glisser-déposer
 
         RelationSettings getRelation (int upper, int lower) const;
+        // Relation active (en tenant compte de « suivre la hiérarchie »).
+        bool isRelationActive (int source, int target) const { return isActive (source) && isActive (target) && source != target
+                                                                       && getRelation (source, target).isActive (isAbove (source, target)); }
+        // Active / désactive une relation depuis la grille (gère « suivre la hiérarchie »).
+        void toggleRelation (int source, int target);
         void setRelation (int upper, int lower, const RelationSettings& s);
 
         int  getMaster() const;              // slot de l'instance maîtresse

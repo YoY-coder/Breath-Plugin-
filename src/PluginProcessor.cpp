@@ -30,6 +30,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout BreathAudioProcessor::create
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "lookahead", 1 }, "Lookahead",
                     NormalisableRange<float> (0.0f, kMaxLookaheadMs, 0.1f), 0.0f,
                     AudioParameterFloatAttributes().withLabel ("ms").withAutomatable (false)));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "makeup", 1 }, "Make-up",
+                    NormalisableRange<float> (-12.0f, 24.0f, 0.1f), 0.0f, AudioParameterFloatAttributes().withLabel ("dB")));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { "autoMakeup", 1 }, "Make-up auto", false));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "stereoMode", 1 }, String::fromUTF8 ("Mode stéréo"),
                     StringArray { String::fromUTF8 ("Stéréo"), "Mid", "Side" }, 0));
     return layout;
@@ -49,6 +52,8 @@ BreathAudioProcessor::BreathAudioProcessor()
     pMix       = apvts.getRawParameterValue ("mix");
     pLookahead = apvts.getRawParameterValue ("lookahead");
     pStereo    = apvts.getRawParameterValue ("stereoMode");
+    pMakeup    = apvts.getRawParameterValue ("makeup");
+    pAutoMakeup = apvts.getRawParameterValue ("autoMakeup");
 
     instanceId = juce::Uuid();
     slotIndex = hub->registerInstance (this, instanceId, creationSeq);
@@ -167,6 +172,10 @@ void BreathAudioProcessor::resetDsp()
     deltaS = pDelta->load() > 0.5f ? 1.0f : 0.0f;
     bypassAllS = 0.0f;
     bypassAllTarget = 0.0f;
+    autoComp = 0.0f;
+    avgBefore = avgAfter = 0.0;
+    ownBands.fill (kSilenceDb);
+    makeupS = makeupTarget = juce::Decibels::decibelsToGain (pMakeup->load());
 
     if (slotIndex >= 0)
     {
@@ -199,6 +208,7 @@ void BreathAudioProcessor::publishFrame (int64_t s)
     d.rank = blockRank;
     d.macro = blockMacro;
     d.bypassAll = blockBypassAll;
+    std::copy (d.bands, d.bands + kNumBands, ownBands.begin());
 
     auto& me = hub->slot (slotIndex);
     if (timelineMode)
@@ -341,7 +351,8 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             continue;
         }
 
-        const auto rel = hub->relation (u, slotIndex).load();
+        const auto& relA = hub->relation (u, slotIndex);
+        const auto rel = relA.load();
         float target = lastTarget[(size_t) u];
 
         if (got[(size_t) u])
@@ -349,7 +360,7 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             const float ru = fr[(size_t) u].rank;
             const int seqU = hub->slot (u).creationSeq.load (std::memory_order_relaxed);
             const bool above = (std::abs (ru - myRank) > 0.5f) ? ru < myRank : seqU < mySeq;
-            target = (above && rel.enabled) ? 1.0f : 0.0f;
+            target = rel.isActive (above) ? 1.0f : 0.0f;
             lastTarget[(size_t) u] = target;
 
             if (! weightInit[(size_t) u])
@@ -384,7 +395,9 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             if (mask[(size_t) b] <= 0.0f)
                 continue;
             const float lvl = got[(size_t) u] ? fr[(size_t) u].bands[b] : kSilenceDb;
-            inst[(size_t) b] = juce::jlimit (0.0f, rel.maxReduction, (lvl - rel.threshold) * rel.amount) * mask[(size_t) b];
+            const float inten = relA.intensity[(size_t) b].load (std::memory_order_relaxed);
+            inst[(size_t) b] = juce::jlimit (0.0f, relA.maxCurve[(size_t) b].load (std::memory_order_relaxed),
+                                             (lvl - rel.threshold) * rel.amount * inten) * mask[(size_t) b];
             if (rel.resolution < 1.0f) rangePower += std::exp ((double) lvl * 0.2302585093) * mask[(size_t) b];
             maskSum += mask[(size_t) b];
         }
@@ -406,9 +419,13 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
         if (res < 1.0f && maskSum > 0.0)
         {
             const float lvlRange = (float) (10.0 * std::log10 (rangePower + 1.0e-14));
-            const float bb = juce::jlimit (0.0f, rel.maxReduction, (lvlRange - rel.threshold) * rel.amount);
+            const float over = (lvlRange - rel.threshold) * rel.amount;
             for (int b = 0; b < kNumBands; ++b)
+            {
+                const float bb = juce::jlimit (0.0f, relA.maxCurve[(size_t) b].load (std::memory_order_relaxed),
+                                               over * relA.intensity[(size_t) b].load (std::memory_order_relaxed));
                 inst[(size_t) b] = res * inst[(size_t) b] + (1.0f - res) * bb * mask[(size_t) b];
+            }
         }
 
         // Attaque / release, puis poids de transition et macro Breath.
@@ -430,6 +447,25 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
     }
 
     bank.setReductions (total.data());
+
+    // Make-up automatique : compense l'énergie retirée (mesurée sur le spectre de la piste).
+    {
+        double before = 0.0, after = 0.0;
+        for (int b = 0; b < kNumBands; ++b)
+        {
+            const double pw = std::exp ((double) ownBands[(size_t) b] * 0.2302585093);
+            before += pw;
+            after += pw * std::exp (-(double) total[(size_t) b] * 0.2302585093);
+        }
+        // Moyenne glissante (~2 s) des puissances avant / après : on compense la perte de volume moyenne.
+        const double c = 1.0 - std::exp (-(double) tickSec / 2.0);
+        avgBefore += (before - avgBefore) * c;
+        avgAfter  += (after - avgAfter) * c;
+        autoComp = avgBefore > 1.0e-9 ? juce::jlimit (0.0f, 12.0f, (float) (10.0 * std::log10 (avgBefore / juce::jmax (avgAfter, 1.0e-30)))) : 0.0f;
+        const float mk = blockMakeup + (blockAutoMakeup ? autoComp : 0.0f);
+        makeupTarget = juce::Decibels::decibelsToGain (mk);
+        autoCompShown.store (autoComp, std::memory_order_relaxed);
+    }
     for (int b = 0; b < kNumBands; ++b)
         me.reductionCurve[(size_t) b].store (total[(size_t) b], std::memory_order_relaxed);
 }
@@ -461,6 +497,9 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const float bypT = pBypass->load() > 0.5f ? 1.0f : 0.0f;
     const float deltaT = pDelta->load() > 0.5f ? 1.0f : 0.0f;
     const int mode = juce::roundToInt (pStereo->load());
+    blockMakeup = pMakeup->load();
+    blockAutoMakeup = pAutoMakeup->load() > 0.5f;
+    if (! blockAutoMakeup) makeupTarget = juce::Decibels::decibelsToGain (blockMakeup);
 
     // Lookahead (latence déclarée à l'hôte)
     const int lat = juce::jlimit (0, delayMask - 1, juce::roundToInt (pLookahead->load() * 0.001f * (float) sr));
@@ -559,10 +598,12 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         smooth (bypS, bypT);
         smooth (deltaS, deltaT);
         smooth (bypassAllS, bypassAllTarget);
+        makeupS += (makeupTarget - makeupS) * smoothCoef;
         const float byp = juce::jmax (bypS, bypassAllS);
 
-        const float pL = wL + ((dL - wL) - wL) * deltaS;
-        const float pR = wR + ((dR - wR) - wR) * deltaS;
+        // Delta : ce qui est retiré (sans make-up). Sinon : signal traité + make-up.
+        const float pL = wL * makeupS + ((dL - wL) - wL * makeupS) * deltaS;
+        const float pR = wR * makeupS + ((dR - wR) - wR * makeupS) * deltaS;
         float oL = dL + (pL - dL) * mixS;
         float oR = dR + (pR - dR) * mixS;
         if (byp >= 1.0f) { oL = dL; oR = dR; }   // bypass complet : signal d'origine exact

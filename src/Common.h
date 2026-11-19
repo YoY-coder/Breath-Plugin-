@@ -53,10 +53,23 @@ namespace breath
         return ((v + multiple - 1) / multiple) * multiple;
     }
 
-    // Réglages d'une relation « piste supérieure → piste inférieure ».
+    // Point de façonnage (« bell ») de la courbe de réduction max d'une relation.
+    struct ShapeNode
+    {
+        float freq = 1000.0f;   // Hz
+        float gain = 0.0f;      // dB ajoutés à la réduction max (négatif = protège cette zone)
+        float width = 1.0f;     // largeur en octaves
+
+        bool operator== (const ShapeNode&) const = default;
+    };
+
+    constexpr int kMaxNodes = 8;
+
+    // Réglages d'une relation « piste source → piste creusée ».
     struct RelationSettings
     {
         bool  enabled     = true;
+        bool  followOrder = true;    // active seulement si la source est au-dessus dans la hiérarchie
         float amount      = 0.5f;    // 0..1 (dB de réduction par dB au-dessus du seuil)
         float maxReduction = 6.0f;   // dB (positif)
         float threshold   = -30.0f;  // dBFS
@@ -65,17 +78,42 @@ namespace breath
         float lowHz       = 20.0f;
         float highHz      = 20000.0f;
         float resolution  = 0.6f;    // 0 = large bande, 1 = spectral fin
+        int   numNodes    = 0;
+        std::array<ShapeNode, kMaxNodes> nodes {};
 
         bool operator== (const RelationSettings&) const = default;
+
+        // Relation active compte tenu de la position des deux pistes dans la hiérarchie.
+        bool isActive (bool sourceIsAbove) const noexcept { return enabled && (! followOrder || sourceIsAbove); }
+
+        // Contribution d'un point à la fréquence f (dB).
+        static float nodeShape (const ShapeNode& n, float f) noexcept
+        {
+            const float d = std::log2 (f / n.freq) / juce::jmax (0.05f, n.width * 0.5f);
+            return n.gain * std::exp (-1.386f * d * d);   // demi-hauteur à ± largeur/2
+        }
+
+        // Réduction max effective à la fréquence f (base + points de façonnage).
+        float maxAt (float f) const noexcept
+        {
+            float v = maxReduction;
+            for (int i = 0; i < numNodes; ++i)
+                v += nodeShape (nodes[(size_t) i], f);
+            return juce::jlimit (0.0f, 30.0f, v);
+        }
     };
 
     // Version « atomique » lue par le thread audio (écrite par le thread de l'interface).
     struct AtomicRelation
     {
-        std::atomic<bool>  enabled { true };
+        std::atomic<bool>  enabled { true }, followOrder { true };
         std::atomic<float> amount { 0.5f }, maxReduction { 6.0f }, threshold { -30.0f },
                            attackMs { 5.0f }, releaseMs { 120.0f },
                            lowHz { 20.0f }, highHz { 20000.0f }, resolution { 0.6f };
+        // Réduction max par bande (courbe façonnée), et facteur d'intensité associé.
+        std::array<std::atomic<float>, kNumBands> maxCurve {}, intensity {};
+
+        AtomicRelation() { store (RelationSettings {}); }
 
         void store (const RelationSettings& s) noexcept
         {
@@ -87,6 +125,15 @@ namespace breath
             lowHz.store (s.lowHz, std::memory_order_relaxed);
             highHz.store (s.highHz, std::memory_order_relaxed);
             resolution.store (s.resolution, std::memory_order_relaxed);
+            for (int b = 0; b < kNumBands; ++b)
+            {
+                const float m = s.maxAt (bandCentre (b));
+                maxCurve[(size_t) b].store (m, std::memory_order_relaxed);
+                // Un point qui creuse plus (ou protège) agit aussi sur l'intensité, pas seulement sur le plafond.
+                intensity[(size_t) b].store (s.maxReduction > 0.01f ? m / s.maxReduction : (m > 0.0f ? 1.0f : 0.0f),
+                                             std::memory_order_relaxed);
+            }
+            followOrder.store (s.followOrder, std::memory_order_relaxed);
             enabled.store (s.enabled, std::memory_order_release);
         }
 
@@ -94,6 +141,7 @@ namespace breath
         {
             RelationSettings s;
             s.enabled      = enabled.load (std::memory_order_acquire);
+            s.followOrder  = followOrder.load (std::memory_order_relaxed);
             s.amount       = amount.load (std::memory_order_relaxed);
             s.maxReduction = maxReduction.load (std::memory_order_relaxed);
             s.threshold    = threshold.load (std::memory_order_relaxed);

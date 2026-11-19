@@ -212,8 +212,12 @@ int main()
         auto s = hub.getRelation (rig[0].getSlot(), rig[1].getSlot());
         s.amount = 0.8f; s.maxReduction = 9.0f; s.threshold = -45.0f;
         s.lowHz = 30.0f; s.highHz = 250.0f; s.resolution = 0.8f;
+        s.numNodes = 1;
+        s.nodes[0] = { 120.0f, -3.0f, 1.0f };     // point de façonnage : protège un peu 120 Hz
         hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), s);
     }
+    // Make-up automatique sur la basse (doit lui aussi être identique à l'export).
+    rig[1].getParams().getParameter ("autoMakeup")->setValueNotifyingHost (1.0f);
     // Lookahead de 6 ms sur la basse (latence + compensation).
     {
         auto* la = rig[1].getParams().getParameter ("lookahead");
@@ -236,14 +240,20 @@ int main()
     check (d3 == 0.0f, "Deux lectures temps reel avec des blocs differents sont identiques");
     check (! rig[1].hasOfflineDesync() && ! rig[2].hasOfflineDesync(), "Aucune desynchronisation signalee pendant l'export");
 
+    const float autoMk = rig[1].getAutoMakeupDb();
+    std::printf ("        make-up automatique de la basse en fin de lecture : %.2f dB\n", autoMk);
+    check (autoMk > 0.3f, "Make-up automatique : compense le volume retire");
+    rig[1].getParams().getParameter ("autoMakeup")->setValueNotifyingHost (0.0f);
+
     // --- 2. Fonctionnel ------------------------------------------------------
+    const auto fn = rig.render ({ 256 }, 0, 11);
     const int lat = rig[1].getLatencyInSamples();
     check (lat == juce::roundToInt (0.006 * kSr), "Lookahead : latence declaree = " + juce::String (lat) + " echantillons");
 
     Signal bassIn = rig.inputs[1];
     Signal bassOutAligned ((size_t) kLen);
     for (int i = 0; i < kLen; ++i)
-        bassOutAligned[(size_t) i] = i + lat < kLen ? rt[1][(size_t) (i + lat)] : std::array<float, 2> { 0.0f, 0.0f };
+        bassOutAligned[(size_t) i] = i + lat < kLen ? fn[1][(size_t) (i + lat)] : std::array<float, 2> { 0.0f, 0.0f };
     const float before = lowEnergyDuringKicks (bassIn), after = lowEnergyDuringKicks (bassOutAligned);
     std::printf ("        graves de la basse pendant les kicks : %.1f dB -> %.1f dB\n", before, after);
     check (after < before - 3.0f, "La basse est creusee par le kick (> 3 dB)");
@@ -251,7 +261,7 @@ int main()
     // Le kick (en tete) n'est pas modifie.
     float kickDiff = 0.0f;
     for (int i = 0; i < kLen; ++i)
-        kickDiff = juce::jmax (kickDiff, std::abs (rt[0][(size_t) i][0] - rig.inputs[0][(size_t) i][0]));
+        kickDiff = juce::jmax (kickDiff, std::abs (fn[0][(size_t) i][0] - rig.inputs[0][(size_t) i][0]));
     check (kickDiff < 1.0e-6f, "Le kick (rang 1) n'est pas modifie");
 
     // Relation désactivée : plus d'atténuation.
@@ -268,6 +278,34 @@ int main()
         check (std::abs (e - before) < 1.5f, "Relation desactivee : la basse n'est plus creusee par le kick");
         s.enabled = true;
         hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), s);
+    }
+
+
+    // Relation libre : le synthé (rang 4) creuse le kick (rang 1) malgré la hiérarchie.
+    {
+        auto s = hub.getRelation (rig[3].getSlot(), rig[0].getSlot());
+        s.enabled = true; s.followOrder = false; s.threshold = -60.0f; s.amount = 1.0f;
+        hub.setRelation (rig[3].getSlot(), rig[0].getSlot(), s);
+        const auto fr = rig.render ({ 256 }, 0, 5);
+        float d = 0.0f;
+        for (int i = 0; i < kLen; ++i)
+            d = juce::jmax (d, std::abs (fr[0][(size_t) i][0] - rig.inputs[0][(size_t) i][0]));
+        check (d > 1.0e-3f, "Relation libre : une piste du dessous peut creuser une piste du dessus");
+        s.enabled = false;
+        hub.setRelation (rig[3].getSlot(), rig[0].getSlot(), s);
+    }
+
+    // Make-up manuel : +6 dB sur le kick (aucune relation active) = gain x2.
+    {
+        auto* mk = rig[0].getParams().getParameter ("makeup");
+        mk->setValueNotifyingHost (mk->convertTo0to1 (6.0f));
+        const float gain = juce::Decibels::decibelsToGain (6.0f);
+        const auto fr = rig.render ({ 256 }, 0, 6);
+        float maxErr = 0.0f;
+        for (int i = (int) kSr; i < kLen; ++i)
+            maxErr = juce::jmax (maxErr, std::abs (fr[0][(size_t) i][0] - gain * rig.inputs[0][(size_t) i][0]));
+        check (maxErr < 1.0e-4f, "Make-up manuel +6 dB = volume x2");
+        mk->setValueNotifyingHost (mk->convertTo0to1 (0.0f));
     }
 
     // --- 3. Bypass All ---------------------------------------------------------

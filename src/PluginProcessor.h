@@ -61,8 +61,10 @@ public:
 
     int savedEditorWidth = 0;
     int currentView = 0;          // 0 = Instance, 1 = Matrice
-    int selectedUpper = -1;       // relation éditée (slot de la piste du dessus)
-    int selectedLower = -1;       // relation éditée dans la matrice (slot de la piste du dessous)
+    int instUpper = -1;           // vue Instance : source de la relation éditée (la cible est cette instance)
+    int selectedUpper = -1;       // vue Matrice : source de la relation sélectionnée
+    int selectedLower = -1;       // vue Matrice : piste creusée de la relation sélectionnée
+    float getAutoMakeupDb() const noexcept { return autoCompShown.load (std::memory_order_relaxed); }
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
@@ -88,6 +90,8 @@ private:
     std::atomic<float>* pMix = nullptr;
     std::atomic<float>* pLookahead = nullptr;
     std::atomic<float>* pStereo = nullptr;
+    std::atomic<float>* pMakeup = nullptr;
+    std::atomic<float>* pAutoMakeup = nullptr;
 
     // Identité
     int slotIndex = -1;
@@ -102,6 +106,7 @@ private:
     // État audio
     std::atomic<double> currentSampleRate { 44100.0 };
     std::atomic<int> currentLatency { 0 };
+    std::atomic<float> autoCompShown { 0.0f };
     double sr = 44100.0;
     breath::Analyzer analyzer;
     breath::FilterBank bank;
@@ -127,6 +132,10 @@ private:
     float mixS = 1.0f, bypS = 0.0f, deltaS = 0.0f, bypassAllS = 0.0f;
     float smoothCoef = 0.001f;
     float bypassAllTarget = 0.0f;
+    float makeupS = 1.0f, makeupTarget = 1.0f, autoComp = 0.0f, blockMakeup = 0.0f;
+    double avgBefore = 0.0, avgAfter = 0.0;
+    bool blockAutoMakeup = false;
+    std::array<float, breath::kNumBands> ownBands {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BreathAudioProcessor)
 };

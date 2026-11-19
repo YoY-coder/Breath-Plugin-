@@ -15,30 +15,25 @@ namespace breath::ui
             return m;
         }
 
-        // Sélection par défaut cohérente (lower = cette instance si possible).
+        // Sélection par défaut cohérente pour la vue Matrice.
         void ensureSelection (BreathAudioProcessor& proc)
         {
             auto& hub = proc.getHub();
             const auto order = hub.hierarchy();
-            auto valid = [&] (int u, int l)
-            {
-                return hub.isActive (u) && hub.isActive (l) && u != l && hub.isAbove (u, l);
-            };
-            if (valid (proc.selectedUpper, proc.selectedLower))
+            const int u = proc.selectedUpper, l = proc.selectedLower;
+            if (hub.isActive (u) && hub.isActive (l) && u != l)
                 return;
 
             const int me = proc.getSlot();
-            const int lower = (hub.isActive (proc.selectedLower) && proc.selectedLower != order.front()) ? proc.selectedLower
-                            : (me >= 0 && ! order.empty() && me != order.front() ? me : (order.size() > 1 ? order[1] : -1));
+            const int lower = hub.isActive (l) ? l : (me >= 0 ? me : (order.empty() ? -1 : order.front()));
             proc.selectedLower = lower;
             proc.selectedUpper = -1;
-            if (lower >= 0)
-                for (int s : order)
-                {
-                    if (s == lower) break;
-                    proc.selectedUpper = s;
-                    if (hub.getRelation (s, lower).enabled) break;
-                }
+            if (lower < 0)
+                return;
+            for (int sIdx : order)
+                if (sIdx != lower && hub.isRelationActive (sIdx, lower)) { proc.selectedUpper = sIdx; return; }
+            for (int sIdx : order)
+                if (sIdx != lower) { proc.selectedUpper = sIdx; return; }
         }
     }
 
@@ -240,29 +235,31 @@ namespace breath::ui
         if (n < 2)
             return;
 
-        const float availW = (float) getWidth() - 100.0f, availH = (float) getHeight() - 120.0f;
-        cellSize = juce::jlimit (16.0f, 52.0f, juce::jmin (availW, availH) / (float) (n - 1) - 6.0f);
+        const float availW = (float) getWidth() - 96.0f, availH = (float) getHeight() - 130.0f;
+        cellSize = juce::jlimit (12.0f, 46.0f, juce::jmin (availW, availH) / (float) n - 5.0f);
         origin = { 84.0f, 70.0f };
+        const float step = cellSize + 5.0f;
 
-        for (int ri = 0; ri < n - 1; ++ri)
-            for (int ci = 0; ci <= ri; ++ci)
-                cells.push_back ({ { origin.x + (cellSize + 6.0f) * (float) ci, origin.y + (cellSize + 6.0f) * (float) ri, cellSize, cellSize },
-                                   order[(size_t) ci], order[(size_t) ri + 1] });
+        for (int ri = 0; ri < n; ++ri)
+            for (int ci = 0; ci < n; ++ci)
+                cells.push_back ({ { origin.x + step * (float) ci, origin.y + step * (float) ri, cellSize, cellSize },
+                                   order[(size_t) ci], order[(size_t) ri], ri == ci });
     }
 
     void RelationGrid::tick()
     {
         for (auto& c : cells)
         {
-            auto& v = shown[(size_t) c.upper][(size_t) c.lower];
-            v += (hub.slot (c.lower).activityFrom[(size_t) c.upper].load (std::memory_order_relaxed) - v) * 0.3f;
+            if (c.diagonal) continue;
+            auto& v = shown[(size_t) c.source][(size_t) c.target];
+            v += (hub.slot (c.target).activityFrom[(size_t) c.source].load (std::memory_order_relaxed) - v) * 0.3f;
         }
         repaint();
     }
 
     void RelationGrid::paint (juce::Graphics& g)
     {
-        drawCaption (g, juce::String::fromUTF8 ("Relations · qui creuse qui"), { 16.0f, 8.0f, 300.0f, 16.0f });
+        drawCaption (g, juce::String::fromUTF8 ("Relations · colonne = qui creuse · ligne = qui est creusé"), { 16.0f, 8.0f, (float) getWidth() - 32.0f, 16.0f });
         const int n = (int) order.size();
 
         if (n < 2)
@@ -274,77 +271,84 @@ namespace breath::ui
             return;
         }
 
-        const float step = cellSize + 6.0f;
-        const float labelFont = cellSize >= 34.0f ? 11.0f : 9.0f;
+        const float step = cellSize + 5.0f;
+        const float labelFont = cellSize >= 30.0f ? 10.0f : 8.5f;
 
-        // En-têtes de colonnes (pistes qui creusent) et de lignes (pistes creusées)
-        for (int ci = 0; ci < n - 1; ++ci)
+        for (int ci = 0; ci < n; ++ci)
         {
             const int s = order[(size_t) ci];
             auto r = juce::Rectangle<float> (origin.x + step * (float) ci - 3.0f, origin.y - 30.0f, step, 22.0f);
             g.setColour (hub.displayColour (s));
             g.fillEllipse (r.getCentreX() - 3.0f, r.getY(), 6.0f, 6.0f);
-            g.setColour (colours::text2);
+            g.setColour (s == proc.selectedUpper ? colours::text : colours::text2);
             g.setFont (font (labelFont, Weight::medium));
             g.drawText (hub.displayName (s), r.withTrimmedTop (7.0f), juce::Justification::centred, true);
         }
-        for (int ri = 0; ri < n - 1; ++ri)
+        for (int ri = 0; ri < n; ++ri)
         {
-            const int s = order[(size_t) ri + 1];
+            const int s = order[(size_t) ri];
             auto r = juce::Rectangle<float> (8.0f, origin.y + step * (float) ri, origin.x - 16.0f, cellSize);
             g.setColour (s == proc.selectedLower ? colours::text : colours::text2);
             g.setFont (font (labelFont + 1.0f, Weight::medium));
             g.drawText (hub.displayName (s), r, juce::Justification::centredRight, true);
-
-            // case « soi-même » hachurée
-            auto self = juce::Rectangle<float> (origin.x + step * (float) (ri + 1), origin.y + step * (float) ri, cellSize, cellSize);
-            if (ri + 1 < n - 1)
-            {
-                juce::Graphics::ScopedSaveState ss (g);
-                g.reduceClipRegion (self.toNearestInt());
-                g.setColour (juce::Colour (0xff222226));
-                for (float d = -cellSize; d < cellSize; d += 5.0f)
-                    g.drawLine (self.getX() + d, self.getBottom(), self.getX() + d + cellSize, self.getY(), 1.0f);
-            }
         }
 
         for (auto& c : cells)
         {
-            const auto rel = hub.getRelation (c.upper, c.lower);
-            const bool sel = c.upper == proc.selectedUpper && c.lower == proc.selectedLower;
+            if (c.diagonal)
+            {
+                juce::Graphics::ScopedSaveState ss (g);
+                g.reduceClipRegion (c.r.toNearestInt());
+                g.setColour (juce::Colour (0xff222226));
+                for (float d = -cellSize; d < cellSize; d += 5.0f)
+                    g.drawLine (c.r.getX() + d, c.r.getBottom(), c.r.getX() + d + cellSize, c.r.getY(), 1.0f);
+                continue;
+            }
 
-            if (! rel.enabled)
+            const auto rel = hub.getRelation (c.source, c.target);
+            const bool above = hub.isAbove (c.source, c.target);
+            const bool active = rel.isActive (above);
+            const bool sel = c.source == proc.selectedUpper && c.target == proc.selectedLower;
+            const float radius = juce::jmin (9.0f, cellSize * 0.25f);
+
+            if (! active)
             {
                 const float dashes[] = { 3.0f, 3.0f };
                 juce::Path p;
-                p.addRoundedRectangle (c.r.reduced (0.5f), 9.0f);
+                p.addRoundedRectangle (c.r.reduced (0.5f), radius);
                 juce::Path dashed;
                 juce::PathStrokeType (1.0f).createDashedStroke (dashed, p, dashes, 2);
-                g.setColour (colours::line2);
+                g.setColour (above ? colours::line2 : colours::line);
                 g.fillPath (dashed);
             }
             else
             {
-                const float v = shown[(size_t) c.upper][(size_t) c.lower];
+                const float v = shown[(size_t) c.source][(size_t) c.target];
                 g.setColour (heat (v));
-                g.fillRoundedRectangle (c.r, 9.0f);
+                g.fillRoundedRectangle (c.r, radius);
                 if (cellSize >= 30.0f)
                 {
                     g.setColour (v > 1.0f ? juce::Colours::white : colours::text2);
                     g.setFont (font (10.0f, Weight::semibold));
                     g.drawText (juce::String::fromUTF8 ("−") + juce::String (v, 1), c.r, juce::Justification::centred);
                 }
+                if (! rel.followOrder)
+                {
+                    // Relation libre (indépendante de la hiérarchie) : petit repère.
+                    g.setColour (juce::Colours::white.withAlpha (0.85f));
+                    g.fillEllipse (c.r.getRight() - 8.0f, c.r.getY() + 4.0f, 4.0f, 4.0f);
+                }
             }
 
             if (sel)
             {
                 g.setColour (juce::Colours::white);
-                g.drawRoundedRectangle (c.r.expanded (2.0f), 10.0f, 2.0f);
+                g.drawRoundedRectangle (c.r.expanded (2.0f), radius + 1.0f, 2.0f);
             }
         }
 
         // Légende
-        const float ly = origin.y + step * (float) (n - 1) + 14.0f;
+        const float ly = origin.y + step * (float) n + 10.0f;
         g.setFont (font (11.0f));
         g.setColour (colours::text3);
         g.drawText (juce::String::fromUTF8 ("Atténuation en direct"), juce::Rectangle<float> (16.0f, ly, 130.0f, 16.0f), juce::Justification::centredLeft);
@@ -356,17 +360,18 @@ namespace breath::ui
         g.fillRoundedRectangle (grad, 2.0f);
         g.setColour (colours::text3);
         g.drawText (juce::String::fromUTF8 ("0 → 9 dB"), juce::Rectangle<float> (248.0f, ly, 80.0f, 16.0f), juce::Justification::centredLeft);
-        g.drawText (juce::String::fromUTF8 ("Clic : régler · Double-clic : activer / désactiver"),
-                    juce::Rectangle<float> (16.0f, ly + 20.0f, (float) getWidth() - 32.0f, 16.0f), juce::Justification::centredLeft);
+        g.drawFittedText (juce::String::fromUTF8 ("Clic : régler · Double-clic : activer / désactiver. Sous la diagonale : la piste du dessus creuse celle du dessous. "
+                                                  "Au-dessus : relations libres (point blanc), actives quel que soit l'ordre."),
+                          juce::Rectangle<float> (16.0f, ly + 20.0f, (float) getWidth() - 32.0f, 48.0f).toNearestInt(), juce::Justification::topLeft, 4, 1.0f);
     }
 
     void RelationGrid::mouseDown (const juce::MouseEvent& e)
     {
         for (auto& c : cells)
-            if (c.r.expanded (3.0f).contains (e.position))
+            if (! c.diagonal && c.r.expanded (2.0f).contains (e.position))
             {
-                proc.selectedUpper = c.upper;
-                proc.selectedLower = c.lower;
+                proc.selectedUpper = c.source;
+                proc.selectedLower = c.target;
                 repaint();
                 if (onSelectionChange) onSelectionChange();
                 return;
@@ -376,22 +381,30 @@ namespace breath::ui
     void RelationGrid::mouseDoubleClick (const juce::MouseEvent& e)
     {
         for (auto& c : cells)
-            if (c.r.expanded (3.0f).contains (e.position))
+            if (! c.diagonal && c.r.expanded (2.0f).contains (e.position))
             {
-                auto s = hub.getRelation (c.upper, c.lower);
-                s.enabled = ! s.enabled;
-                hub.beginEdit();
-                hub.setRelation (c.upper, c.lower, s);
-                hub.endEdit();
+                hub.toggleRelation (c.source, c.target);
                 return;
             }
     }
 
     //==========================================================================
-    RelationPanel::RelationPanel (BreathAudioProcessor& p) : proc (p), hub (p.getHub())
+    RelationPanel::RelationPanel (BreathAudioProcessor& p, Mode m) : proc (p), hub (p.getHub()), mode (m)
     {
-        enabled.onClick = [this] { if (! updating) { hub.beginEdit(); apply(); hub.endEdit(); } };
+        enabled.setTooltip (juce::String::fromUTF8 ("Activer / désactiver cette relation"));
+        enabled.onClick = [this]
+        {
+            if (updating) return;
+            const int u = source(), l = target();
+            if (hub.isRelationActive (u, l) != enabled.getToggleState())
+                hub.toggleRelation (u, l);
+        };
         addAndMakeVisible (enabled);
+
+        follow.setTooltip (juce::String::fromUTF8 ("Activé : la relation ne joue que si la source est au-dessus dans la hiérarchie "
+                                                   "(l'ordre et l'automation de Priorité la font basculer). Désactivé : relation libre, toujours active."));
+        follow.onClick = [this] { if (! updating) { hub.beginEdit(); apply(); hub.endEdit(); } };
+        addAndMakeVisible (follow);
 
         auto setup = [this] (juce::Slider& s, double lo, double hi, double def, double skewMid = 0.0)
         {
@@ -443,20 +456,23 @@ namespace breath::ui
                     const double r = resolution.getValue();
                     if (r < 0.03) return juce::String ("Large bande");
                     const double sigma = 0.5 * (std::pow (2.0, (1.0 - r) * 6.0) - 1.0);
-                    return juce::String::fromUTF8 ("≈ ") + juce::String (juce::jlimit (2, 64, juce::roundToInt (64.0 / (1.0 + 2.0 * sigma)))) + " bandes";
+                    return juce::String::fromUTF8 ("≈ ") + juce::String (juce::jlimit (2, kNumBands, juce::roundToInt (kNumBands / (1.0 + 2.0 * sigma)))) + " bandes";
                 } },
         };
 
         refresh();
     }
 
+    int RelationPanel::source() const { return mode == Mode::instance ? proc.instUpper : proc.selectedUpper; }
+    int RelationPanel::target() const { return mode == Mode::instance ? proc.getSlot() : proc.selectedLower; }
+
     void RelationPanel::apply()
     {
-        const int u = proc.selectedUpper, l = proc.selectedLower;
-        if (! hub.isActive (u) || ! hub.isActive (l))
+        const int u = source(), l = target();
+        if (! hub.isActive (u) || ! hub.isActive (l) || u == l)
             return;
-        RelationSettings s;
-        s.enabled = enabled.getToggleState();
+        auto s = hub.getRelation (u, l);   // garde « activée » et les points de façonnage
+        s.followOrder = follow.getToggleState();
         s.amount = (float) amount.getValue();
         s.maxReduction = (float) maxRed.getValue();
         s.threshold = (float) threshold.getValue();
@@ -471,18 +487,21 @@ namespace breath::ui
 
     void RelationPanel::refresh()
     {
-        ensureSelection (proc);
-        const int u = proc.selectedUpper, l = proc.selectedLower;
-        const bool ok = hub.isActive (u) && hub.isActive (l);
+        if (mode == Mode::matrix)
+            ensureSelection (proc);
+        const int u = source(), l = target();
+        const bool ok = hub.isActive (u) && hub.isActive (l) && u != l;
 
-        for (auto* c : std::initializer_list<juce::Component*> { &enabled, &amount, &maxRed, &threshold, &attack, &release, &range, &resolution })
+        for (auto* c : std::initializer_list<juce::Component*> { &enabled, &follow, &amount, &maxRed, &threshold, &attack, &release, &range, &resolution })
             c->setVisible (ok);
 
         if (ok && ! editing)
         {
             const juce::ScopedValueSetter<bool> svs (updating, true);
             const auto s = hub.getRelation (u, l);
-            enabled.setToggleState (s.enabled, juce::dontSendNotification);
+            const bool active = hub.isRelationActive (u, l);
+            enabled.setToggleState (active, juce::dontSendNotification);
+            follow.setToggleState (s.followOrder, juce::dontSendNotification);
             amount.setValue (s.amount, juce::dontSendNotification);
             maxRed.setValue (s.maxReduction, juce::dontSendNotification);
             threshold.setValue (s.threshold, juce::dontSendNotification);
@@ -491,47 +510,52 @@ namespace breath::ui
             range.setMinAndMaxValues (s.lowHz, s.highHz, juce::dontSendNotification);
             resolution.setValue (s.resolution, juce::dontSendNotification);
             for (auto* sl : { &amount, &maxRed, &threshold, &attack, &release, &range, &resolution })
-                sl->setEnabled (s.enabled);
+                sl->setEnabled (active);
         }
         repaint();
     }
 
     void RelationPanel::resized()
     {
-        enabled.setBounds (getWidth() - 50, 34, 40, 26);
-        float y = 76.0f;
+        enabled.setBounds (getWidth() - 50, 30, 40, 26);
+        float y = 70.0f;
+        const float rh = rowHeight();
         for (auto& r : rows)
         {
-            r.slider->setBounds (juce::Rectangle<float> (16.0f, y + 20.0f, (float) getWidth() - 32.0f, 18.0f).toNearestInt().expanded (4, 0));
-            y += 52.0f;
+            r.slider->setBounds (juce::Rectangle<float> (16.0f, y + 17.0f, (float) getWidth() - 32.0f, 16.0f).toNearestInt().expanded (4, 0));
+            y += rh;
         }
+        follow.setBounds (getWidth() - 50, (int) y + 2, 40, 24);
     }
 
     void RelationPanel::paint (juce::Graphics& g)
     {
-        drawCaption (g, juce::String::fromUTF8 ("Relation sélectionnée"), { 16.0f, 8.0f, 240.0f, 16.0f });
-        const int u = proc.selectedUpper, l = proc.selectedLower;
-        if (! hub.isActive (u) || ! hub.isActive (l))
+        drawCaption (g, mode == Mode::instance ? juce::String::fromUTF8 ("Relation") : juce::String::fromUTF8 ("Relation sélectionnée"),
+                     { 16.0f, 8.0f, 240.0f, 16.0f });
+        const int u = source(), l = target();
+        if (! hub.isActive (u) || ! hub.isActive (l) || u == l)
         {
             g.setColour (colours::text3);
             g.setFont (font (12.0f));
-            g.drawFittedText (juce::String::fromUTF8 ("Cliquez sur une case de la grille pour régler une relation."),
-                              getLocalBounds().reduced (20).withTrimmedTop (30), juce::Justification::centredTop, 3);
+            g.drawFittedText (mode == Mode::instance
+                                  ? juce::String::fromUTF8 ("Aucune piste ne creuse celle-ci. Utilisez « + » au-dessus du spectre pour en ajouter une.")
+                                  : juce::String::fromUTF8 ("Cliquez sur une case de la grille pour régler une relation."),
+                              getLocalBounds().reduced (20).withTrimmedTop (30), juce::Justification::centredTop, 4);
             return;
         }
 
         // « ● Kick → ● Basse »
         float x = 16.0f;
-        const float cy = 47.0f;
-        auto who = [&] (int s)
+        const float cy = 43.0f;
+        auto who = [&] (int sl)
         {
-            g.setColour (hub.displayColour (s));
+            g.setColour (hub.displayColour (sl));
             g.fillEllipse (x, cy - 5.0f, 10.0f, 10.0f);
             x += 16.0f;
             g.setColour (colours::text);
             g.setFont (font (14.0f, Weight::semibold));
-            const auto nm = hub.displayName (s);
-            const float w = juce::jmin (70.0f, textWidth (font (14.0f, Weight::semibold), nm) + 2.0f);
+            const auto nm = hub.displayName (sl);
+            const float w = juce::jmin (68.0f, textWidth (font (14.0f, Weight::semibold), nm) + 2.0f);
             g.drawText (nm, juce::Rectangle<float> (x, cy - 10.0f, w, 20.0f), juce::Justification::centredLeft, true);
             x += w + 6.0f;
         };
@@ -542,24 +566,30 @@ namespace breath::ui
         x += 22.0f;
         who (l);
 
-        float y = 76.0f;
-        const bool en = hub.getRelation (u, l).enabled;
+        float y = 70.0f;
+        const float rh = rowHeight();
+        const bool en = hub.isRelationActive (u, l);
         for (auto& r : rows)
         {
             g.setColour (colours::line);
-            g.fillRect (8.0f, y - 6.0f, (float) getWidth() - 16.0f, 1.0f);
+            g.fillRect (8.0f, y - 4.0f, (float) getWidth() - 16.0f, 1.0f);
             g.setFont (font (12.0f));
             g.setColour (en ? colours::text2 : colours::text3);
-            g.drawText (r.label, juce::Rectangle<float> (16.0f, y, 140.0f, 16.0f), juce::Justification::centredLeft);
+            g.drawText (r.label, juce::Rectangle<float> (16.0f, y, 140.0f, 15.0f), juce::Justification::centredLeft);
             g.setFont (font (12.0f, Weight::semibold));
             g.setColour (en ? colours::text : colours::text3);
-            g.drawText (r.value(), juce::Rectangle<float> (16.0f, y, (float) getWidth() - 32.0f, 16.0f), juce::Justification::centredRight);
-            y += 52.0f;
+            g.drawText (r.value(), juce::Rectangle<float> (16.0f, y, (float) getWidth() - 32.0f, 15.0f), juce::Justification::centredRight);
+            y += rh;
         }
+        g.setColour (colours::line);
+        g.fillRect (8.0f, y - 4.0f, (float) getWidth() - 16.0f, 1.0f);
+        g.setFont (font (12.0f));
+        g.setColour (colours::text2);
+        g.drawText (juce::String::fromUTF8 ("Suivre la hiérarchie"), juce::Rectangle<float> (16.0f, y + 2.0f, 160.0f, 24.0f), juce::Justification::centredLeft);
     }
 
     //==========================================================================
-    MatrixView::MatrixView (BreathAudioProcessor& p) : proc (p), list (p), grid (p), panel (p)
+    MatrixView::MatrixView (BreathAudioProcessor& p) : proc (p), list (p), grid (p), panel (p, RelationPanel::Mode::matrix)
     {
         list.onSelect = [this] (int s)
         {

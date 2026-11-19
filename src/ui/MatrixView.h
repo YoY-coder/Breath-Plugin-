@@ -34,7 +34,7 @@ namespace breath::ui
         int hoverStar = -1;
     };
 
-    // Grille « qui creuse qui » avec heatmap.
+    // Grille libre « qui creuse qui » (toutes les combinaisons) avec heatmap.
     class RelationGrid : public juce::Component
     {
     public:
@@ -43,12 +43,13 @@ namespace breath::ui
 
         void refresh();
         void tick();
+        void resized() override { layoutCells(); }
         void paint (juce::Graphics&) override;
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDoubleClick (const juce::MouseEvent&) override;
 
     private:
-        struct Cell { juce::Rectangle<float> r; int upper, lower; };
+        struct Cell { juce::Rectangle<float> r; int source, target; bool diagonal; };
         void layoutCells();
 
         BreathAudioProcessor& proc;
@@ -60,22 +61,27 @@ namespace breath::ui
         std::array<std::array<float, kMaxInstances>, kMaxInstances> shown {};
     };
 
-    // Réglages de la relation sélectionnée.
+    // Réglages d'une relation (utilisé dans la vue Instance et dans la vue Matrice).
     class RelationPanel : public juce::Component
     {
     public:
-        explicit RelationPanel (BreathAudioProcessor& p);
+        enum class Mode { instance, matrix };
+        RelationPanel (BreathAudioProcessor& p, Mode m);
         void refresh();
         void paint (juce::Graphics&) override;
         void resized() override;
 
     private:
         struct Row { juce::String label; juce::Slider* slider; std::function<juce::String()> value; };
+        int source() const;
+        int target() const;
         void apply();
+        float rowHeight() const { return mode == Mode::instance ? 38.0f : 46.0f; }
 
         BreathAudioProcessor& proc;
         BreathHub& hub;
-        juce::ToggleButton enabled;
+        Mode mode;
+        juce::ToggleButton enabled, follow;
         juce::Slider amount, maxRed, threshold, attack, release, range, resolution;
         std::vector<Row> rows;
         bool editing = false, updating = false;

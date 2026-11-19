@@ -69,13 +69,17 @@ int main (int argc, char** argv)
         auto s = hub.getRelation (procs[0]->getSlot(), procs[1]->getSlot());
         s.lowHz = 30.0f; s.highHz = 180.0f; s.threshold = -38.0f; s.amount = 0.9f;
         hub.setRelation (procs[0]->getSlot(), procs[1]->getSlot(), s);
+        s.numNodes = 1;
+        s.nodes[0] = { 110.0f, -3.5f, 0.8f };
+        hub.setRelation (procs[0]->getSlot(), procs[1]->getSlot(), s);
         auto v = hub.getRelation (procs[2]->getSlot(), procs[1]->getSlot());
-        v.lowHz = 300.0f; v.highHz = 3000.0f;
+        v.lowHz = 300.0f; v.highHz = 3000.0f; v.followOrder = false; v.threshold = -45.0f;
         hub.setRelation (procs[2]->getSlot(), procs[1]->getSlot(), v);
         auto d = hub.getRelation (procs[1]->getSlot(), procs[2]->getSlot());
         d.enabled = false;
         hub.setRelation (procs[1]->getSlot(), procs[2]->getSlot(), d);
     }
+    procs[1]->getParams().getParameter ("autoMakeup")->setValueNotifyingHost (1.0f);
     auto* la = procs[1]->getParams().getParameter ("lookahead");
     la->setValueNotifyingHost (la->convertTo0to1 (5.0f));
 

@@ -24,6 +24,15 @@ namespace breath
             t.setProperty ("low", r.lowHz, nullptr);
             t.setProperty ("high", r.highHz, nullptr);
             t.setProperty ("resolution", r.resolution, nullptr);
+            t.setProperty ("follow", r.followOrder, nullptr);
+            for (int i = 0; i < r.numNodes; ++i)
+            {
+                juce::ValueTree n ("Node");
+                n.setProperty ("f", r.nodes[(size_t) i].freq, nullptr);
+                n.setProperty ("g", r.nodes[(size_t) i].gain, nullptr);
+                n.setProperty ("w", r.nodes[(size_t) i].width, nullptr);
+                t.appendChild (n, nullptr);
+            }
             return t;
         }
 
@@ -39,6 +48,10 @@ namespace breath
             r.lowHz        = t.getProperty ("low", r.lowHz);
             r.highHz       = t.getProperty ("high", r.highHz);
             r.resolution   = t.getProperty ("resolution", r.resolution);
+            r.followOrder  = t.getProperty ("follow", r.followOrder);
+            for (const auto& n : t)
+                if (n.hasType ("Node") && r.numNodes < kMaxNodes)
+                    r.nodes[(size_t) r.numNodes++] = { (float) n["f"], (float) n["g"], (float) n.getProperty ("w", 1.0f) };
             return r;
         }
 
@@ -257,6 +270,27 @@ namespace breath
         relationModel[keyFor (upper, lower)] = s;
         relations[(size_t) upper][(size_t) lower].store (s);
         modelChanged (editDepth == 0);
+    }
+
+    void BreathHub::toggleRelation (int source, int target)
+    {
+        if (! isActive (source) || ! isActive (target) || source == target)
+            return;
+        auto s = getRelation (source, target);
+        const bool above = isAbove (source, target);
+        if (s.isActive (above))
+        {
+            if (above) s.enabled = false;        // relation « normale » : on la coupe
+            else       s.followOrder = true;     // relation vers le haut : retour en veille
+        }
+        else
+        {
+            s.enabled = true;
+            s.followOrder = above;               // vers le haut : active quelle que soit la hiérarchie
+        }
+        beginEdit();
+        setRelation (source, target, s);
+        endEdit();
     }
 
     void BreathHub::pushRelationsToAudio()

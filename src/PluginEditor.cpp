@@ -7,6 +7,9 @@ BreathAudioProcessorEditor::BreathAudioProcessorEditor (BreathAudioProcessor& p)
       topBar (p), instanceView (p), matrixView (p),
       vblank (this, [this] { onFrame(); })
 {
+    // Lire la taille mémorisée AVANT toute mise en place (les limites de taille déclenchent un redimensionnement).
+    const int remembered = processor.savedEditorWidth;
+
     setLookAndFeel (&lnf);
     tooltips.setLookAndFeel (&lnf);
 
@@ -28,8 +31,9 @@ BreathAudioProcessorEditor::BreathAudioProcessorEditor (BreathAudioProcessor& p)
     setResizable (true, true);
     setResizeLimits (designWidth * 2 / 3, designHeight * 2 / 3, designWidth * 3, designHeight * 3);
     getConstrainer()->setFixedAspectRatio ((double) designWidth / (double) designHeight);
-    const int w = processor.savedEditorWidth > 0 ? processor.savedEditorWidth : designWidth;
+    const int w = juce::jlimit (designWidth * 2 / 3, designWidth * 3, remembered > 0 ? remembered : designWidth);
     setSize (w, juce::roundToInt (w * (double) designHeight / designWidth));
+    ready = true;
 
     processor.getHub().addChangeListener (this);
 }
@@ -85,7 +89,8 @@ void BreathAudioProcessorEditor::resized()
 {
     const float scale = (float) getWidth() / (float) designWidth;
     content.setTransform (juce::AffineTransform::scale (scale));
-    processor.savedEditorWidth = getWidth();
+    if (ready)
+        processor.savedEditorWidth = getWidth();
 }
 
 void BreathAudioProcessorEditor::paint (juce::Graphics& g)
