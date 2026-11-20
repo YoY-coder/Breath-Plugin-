@@ -154,10 +154,17 @@ namespace breath::ui
         return p;
     }
 
-    float SpectrumView::thresholdAt (const RelationSettings& rel, int src, float x) const
+    float SpectrumView::thresholdAt (const RelationSettings& rel, int src, float x, int skipThrNode) const
     {
+        // Décalage des points de façonnage du seuil (sauf « skip », utile pendant qu'on déplace un point).
+        float nodes = 0.0f;
+        const float f = xToFreq (x);
+        for (int i = 0; i < rel.numThrNodes; ++i)
+            if (i != skipThrNode)
+                nodes += RelationSettings::nodeShape (rel.thrNodes[(size_t) i], f);
+
         if (! rel.autoThreshold)
-            return rel.threshold;
+            return juce::jlimit (-90.0f, 6.0f, rel.threshold + nodes);
         // Spectre de la source lissé sur ≈ 1 octave (approximation de ce que fait le moteur), + décalage.
         const float bandPos = freqToBand (xToFreq (x));
         const auto& sp = upper[(size_t) juce::jlimit (0, kMaxInstances - 1, src)];
@@ -169,7 +176,14 @@ namespace breath::ui
             acc += w * sp[(size_t) b];
             wsum += w;
         }
-        return juce::jmax (-80.0f, (float) (acc / wsum) + rel.autoOffset);
+        return juce::jmax (-80.0f, (float) (acc / wsum) + rel.autoOffset + nodes);
+    }
+
+    juce::Point<float> SpectrumView::kneeHandlePos (const RelationSettings& rel, int src) const
+    {
+        // Poignée du knee : près du bord gauche de la zone, sur le bord haut de la bande du knee.
+        const float x = juce::jmin (freqToX (rel.lowHz) + 22.0f, (freqToX (rel.lowHz) + freqToX (rel.highHz)) * 0.5f - 16.0f);
+        return { x, specDbToY (thresholdAt (rel, src, x) + 0.5f * rel.knee) - 8.0f };
     }
 
     void SpectrumView::drawPill (juce::Graphics& g, juce::Point<float> anchor, const juce::String& text, juce::Colour c, int align) const
@@ -345,10 +359,62 @@ namespace breath::ui
                     const float y = specDbToY (thresholdAt (rel, sel, x));
                     if (i == 0) thrPath.startNewSubPath (x, y); else thrPath.lineTo (x, y);
                 }
+                // Bande du knee : zone où la réduction démarre progressivement.
+                if (rel.knee > 0.05f)
+                {
+                    juce::Path band;
+                    for (int i = 0; i <= steps; ++i)
+                    {
+                        const float x = x0 + (x1 - x0) * (float) i / (float) steps;
+                        const float y = specDbToY (thresholdAt (rel, sel, x) + 0.5f * rel.knee);
+                        if (i == 0) band.startNewSubPath (x, y); else band.lineTo (x, y);
+                    }
+                    for (int i = steps; i >= 0; --i)
+                    {
+                        const float x = x0 + (x1 - x0) * (float) i / (float) steps;
+                        band.lineTo (x, specDbToY (thresholdAt (rel, sel, x) - 0.5f * rel.knee));
+                    }
+                    band.closeSubPath();
+                    g.setColour (c.withAlpha (0.10f));
+                    g.fillPath (band);
+                }
+
                 juce::Path dashed;
                 juce::PathStrokeType (1.5f).createDashedStroke (dashed, thrPath, d, 2);
                 g.setColour (c);
                 g.fillPath (dashed);
+
+                // Points du seuil
+                for (int i = 0; i < rel.numThrNodes; ++i)
+                {
+                    const auto& n = rel.thrNodes[(size_t) i];
+                    const auto pt = juce::Point<float> (freqToX (n.freq), specDbToY (thresholdAt (rel, sel, freqToX (n.freq))));
+                    const bool hot = (hover.t == Target::thrNode && hover.node == i) || (drag.t == Target::thrNode && drag.node == i);
+                    const float xl = freqToX (n.freq / std::pow (2.0f, n.width * 0.5f)), xr = freqToX (n.freq * std::pow (2.0f, n.width * 0.5f));
+                    g.setColour (c.withAlpha (hot ? 0.20f : 0.09f));
+                    g.fillRoundedRectangle (xl, pt.y - 3.0f, xr - xl, 6.0f, 3.0f);
+                    g.setColour (c);
+                    g.fillEllipse (pt.x - 6.0f, pt.y - 6.0f, 12.0f, 12.0f);
+                    g.setColour (juce::Colour (0xff141416));
+                    g.fillEllipse (pt.x - 2.5f, pt.y - 2.5f, 5.0f, 5.0f);
+                    if (hot)
+                        drawPill (g, { pt.x, pt.y + 20.0f }, hzText (n.freq) + juce::String::fromUTF8 (" · ") + dbText (n.gain), c, 0);
+                }
+
+                // Poignée du knee (seuil « soft »)
+                {
+                    const auto kp = kneeHandlePos (rel, sel);
+                    const bool hot = hover.t == Target::knee || drag.t == Target::knee;
+                    auto kr = juce::Rectangle<float> (16.0f, 10.0f).withCentre (kp);
+                    g.setColour (hot ? c : c.withAlpha (0.7f));
+                    g.fillRoundedRectangle (kr, 4.0f);
+                    g.setColour (juce::Colour (0xff141416));
+                    g.drawLine (kr.getX() + 4.0f, kr.getCentreY() - 1.5f, kr.getRight() - 4.0f, kr.getCentreY() - 1.5f, 1.0f);
+                    g.drawLine (kr.getX() + 4.0f, kr.getCentreY() + 1.5f, kr.getRight() - 4.0f, kr.getCentreY() + 1.5f, 1.0f);
+                    if (hot)
+                        drawPill (g, { kp.x, kp.y - 16.0f }, "knee " + juce::String (rel.knee, 1) + " dB", c, 0);
+                }
+
                 const float y = specDbToY (thresholdAt (rel, sel, hx));
                 g.setColour (juce::Colours::white);
                 g.fillEllipse (hx - 6.5f, y - 6.5f, 13.0f, 13.0f);
@@ -407,7 +473,7 @@ namespace breath::ui
             {
             g.setFont (font (10.0f));
             g.setColour (colours::text3);
-            g.drawText (juce::String::fromUTF8 ("Bords : glisser ↔ fréquence, ↕ pente · courbe bleue : double-clic = ajouter un point, molette = largeur"),
+            g.drawText (juce::String::fromUTF8 ("Bords : ↔ fréquence, ↕ pente · courbes bleue (max) et pointillée (seuil) : double-clic = point, molette = largeur · poignée ≡ = knee"),
                         juce::Rectangle<float> (a.getX() + 12.0f, a.getBottom() - 40.0f, a.getWidth() - 24.0f, 14.0f),
                         juce::Justification::centredLeft);
             }
@@ -514,6 +580,15 @@ namespace breath::ui
                     return { Target::node, sel, i };
             }
 
+            for (int i = 0; i < rel.numThrNodes; ++i)
+            {
+                const float nx = freqToX (rel.thrNodes[(size_t) i].freq);
+                if (p.getDistanceFrom ({ nx, specDbToY (thresholdAt (rel, sel, nx)) }) < 9.0f)
+                    return { Target::thrNode, sel, i };
+            }
+            if (p.getDistanceFrom (kneeHandlePos (rel, sel)) < 9.0f)
+                return { Target::knee, sel, -1 };
+
             const float x0 = freqToX (rel.lowHz), x1 = freqToX (rel.highHz);
             const bool inX = p.x >= x0 - 4.0f && p.x <= x1 + 4.0f;
 
@@ -540,7 +615,9 @@ namespace breath::ui
             case Target::highEdge:    setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); break;
             case Target::maxLine:
             case Target::threshold:   setMouseCursor (juce::MouseCursor::UpDownResizeCursor); break;
-            case Target::node:        setMouseCursor (juce::MouseCursor::DraggingHandCursor); break;
+            case Target::node:
+            case Target::thrNode:     setMouseCursor (juce::MouseCursor::DraggingHandCursor); break;
+            case Target::knee:        setMouseCursor (juce::MouseCursor::UpDownResizeCursor); break;
             case Target::chip:
             case Target::addChip:
             case Target::selectOther: setMouseCursor (juce::MouseCursor::PointingHandCursor); break;
@@ -615,6 +692,23 @@ namespace breath::ui
             return;
         }
 
+        if (drag.t == Target::thrNode && e.mods.isPopupMenu())
+        {
+            auto s = hub.getRelation (drag.slot, me);
+            const int idx = drag.node;
+            drag = {};
+            juce::PopupMenu m;
+            m.addItem (1, "Supprimer le point du seuil");
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [this, s, idx] (int r) mutable
+            {
+                if (r != 1 || idx >= s.numThrNodes) return;
+                for (int i = idx; i < s.numThrNodes - 1; ++i) s.thrNodes[(size_t) i] = s.thrNodes[(size_t) i + 1];
+                --s.numThrNodes;
+                hub.beginEdit(); hub.setRelation (proc.instUpper, me, s); hub.endEdit();
+            });
+            return;
+        }
+
         if (drag.t == Target::node && e.mods.isPopupMenu())
         {
             auto s = hub.getRelation (drag.slot, me);
@@ -681,6 +775,18 @@ namespace breath::ui
                 if (s.autoThreshold) s.autoOffset = juce::jlimit (-24.0f, 24.0f, dragStart.autoOffset + yToSpecDb (p.y) - yToSpecDb (dragOrigin.y));
                 else                 s.threshold = juce::jlimit (-80.0f, 0.0f, yToSpecDb (p.y));
                 break;
+            case Target::thrNode:
+            {
+                auto& n = s.thrNodes[(size_t) drag.node];
+                n.freq = juce::jlimit (kMinFreq, kMaxFreq, xToFreq (p.x));
+                const float without = thresholdAt (s, drag.slot, freqToX (n.freq), drag.node);
+                n.gain = juce::jlimit (-40.0f, 40.0f, yToSpecDb (p.y) - without);
+                break;
+            }
+            case Target::knee:
+                // Vers le haut = knee plus large (seuil plus doux).
+                s.knee = juce::jlimit (0.0f, 24.0f, dragStart.knee + 2.0f * (yToSpecDb (p.y) - yToSpecDb (dragOrigin.y)));
+                break;
             case Target::node:
             {
                 auto& n = s.nodes[(size_t) drag.node];
@@ -704,10 +810,10 @@ namespace breath::ui
     void SpectrumView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
     {
         const auto h = hitTest (e.position);
-        if (h.t != Target::node)
+        if (h.t != Target::node && h.t != Target::thrNode)
             return;
         auto s = hub.getRelation (h.slot, me);
-        auto& n = s.nodes[(size_t) h.node];
+        auto& n = h.t == Target::node ? s.nodes[(size_t) h.node] : s.thrNodes[(size_t) h.node];
         n.width = juce::jlimit (0.1f, 6.0f, n.width * (w.deltaY > 0 ? 1.12f : 1.0f / 1.12f));
         hub.beginEdit();
         hub.setRelation (h.slot, me, s);
@@ -742,7 +848,29 @@ namespace breath::ui
         }
         else if (h.t == Target::lowEdge)   { s.lowHz = defaults.lowHz;   s.lowSlope = defaults.lowSlope; }
         else if (h.t == Target::highEdge)  { s.highHz = defaults.highHz; s.highSlope = defaults.highSlope; }
-        else if (h.t == Target::threshold) { s.threshold = defaults.threshold; s.autoOffset = defaults.autoOffset; }
+        else if (h.t == Target::thrNode)
+        {
+            for (int i = h.node; i < s.numThrNodes - 1; ++i)
+                s.thrNodes[(size_t) i] = s.thrNodes[(size_t) i + 1];
+            --s.numThrNodes;
+        }
+        else if (h.t == Target::knee) { s.knee = 0.0f; }
+        else if (h.t == Target::threshold)
+        {
+            const float hx = (freqToX (s.lowHz) + freqToX (s.highHz)) * 0.5f;
+            if (std::abs (e.position.x - hx) < 9.0f)
+            {
+                // Double-clic sur la poignée centrale : seuil par défaut.
+                s.threshold = defaults.threshold;
+                s.autoOffset = defaults.autoOffset;
+            }
+            else
+            {
+                // Double-clic ailleurs sur la courbe de seuil : nouveau point.
+                if (s.numThrNodes >= kMaxNodes) return;
+                s.thrNodes[(size_t) s.numThrNodes++] = { juce::jlimit (kMinFreq, kMaxFreq, xToFreq (e.position.x)), 0.0f, 1.0f };
+            }
+        }
         else if (h.t == Target::none && graphArea().contains (e.position)
                  && e.position.x >= freqToX (s.lowHz) && e.position.x <= freqToX (s.highHz)
                  && e.position.y < redDbToY (24.0f) && s.numNodes < kMaxNodes)

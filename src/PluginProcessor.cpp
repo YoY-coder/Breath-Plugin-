@@ -334,6 +334,15 @@ bool BreathAudioProcessor::fetchFrame (int u, int64_t r, bool offline, FrameData
     return fallback();
 }
 
+// Décalage du seuil (points de façonnage) moyenné sur les bandes fines d'une bande de filtrage.
+static inline float thrOffsetGrid (const AtomicRelation& relA, int j, int stride) noexcept
+{
+    float v = 0.0f;
+    for (int k = 0; k < stride; ++k)
+        v += relA.thrOffset[(size_t) (j * stride + k)].load (std::memory_order_relaxed);
+    return v / (float) stride;
+}
+
 void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
 {
     auto& me = hub->slot (slotIndex);
@@ -475,13 +484,13 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             {
                 if (! refInit[(size_t) u]) ref[(size_t) j] = sm[(size_t) j];
                 else                       ref[(size_t) j] += (sm[(size_t) j] - ref[(size_t) j]) * c;
-                thr[(size_t) j] = juce::jmax (-80.0f, ref[(size_t) j] + rel.autoOffset);
+                thr[(size_t) j] = juce::jmax (-80.0f, ref[(size_t) j] + rel.autoOffset + thrOffsetGrid (relA, j, stride));
             }
             refInit[(size_t) u] = true;
         }
         else
         {
-            for (int j = 0; j < nb; ++j) thr[(size_t) j] = rel.threshold;
+            for (int j = 0; j < nb; ++j) thr[(size_t) j] = rel.threshold + thrOffsetGrid (relA, j, stride);
         }
 
         // Réduction instantanée par bande (plage avec bords en fondu selon la pente).
@@ -515,6 +524,7 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             float over = lvl - thr[(size_t) j];
             // Masking : on ne creuse que là où la piste creusée a elle aussi de l'énergie.
             if (masking) over = juce::jmin (over, tgtGrid[(size_t) j] - thr[(size_t) j]);
+            over = RelationSettings::kneeCurve (over, rel.knee);   // seuil dur ou « soft »
             inst[(size_t) j] = juce::jlimit (0.0f, maxC, over * amount * inten) * mk;
             if (rel.resolution < 1.0f && lvl > -100.0f) rangePower += (double) (std::exp (lvl * 0.2302585093f) * mk);
             maskSum += mk;
@@ -549,12 +559,12 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             float meanThr = 0.0f;
             for (int j = 0; j < nb; ++j) meanThr += thr[(size_t) j] * mask[(size_t) j];
             meanThr /= (float) maskSum;
-            const float over = (lvlRange - meanThr) * amount;
+            const float over = RelationSettings::kneeCurve (lvlRange - meanThr, rel.knee) * amount;
             for (int j = 0; j < nb; ++j)
             {
                 if (mask[(size_t) j] <= 0.0f) continue;
                 float ov = over * curveInt[(size_t) j];
-                if (masking) ov = juce::jmin (ov, (tgtGrid[(size_t) j] - thr[(size_t) j]) * amount * curveInt[(size_t) j]);
+                if (masking) ov = juce::jmin (ov, RelationSettings::kneeCurve (tgtGrid[(size_t) j] - thr[(size_t) j], rel.knee) * amount * curveInt[(size_t) j]);
                 const float bb = juce::jlimit (0.0f, curveMax[(size_t) j], ov);
                 inst[(size_t) j] = res * inst[(size_t) j] + (1.0f - res) * bb * mask[(size_t) j];
             }

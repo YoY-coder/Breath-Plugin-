@@ -96,6 +96,9 @@ namespace breath
         float resolution  = 0.6f;    // 0 = large bande, 1 = spectral fin
         int   numNodes    = 0;
         std::array<ShapeNode, kMaxNodes> nodes {};
+        float knee        = 0.0f;    // largeur du « knee » du seuil (dB) : 0 = dur, grand = démarrage très doux
+        int   numThrNodes = 0;       // points de façonnage de la courbe de seuil (gain = dB ajoutés au seuil)
+        std::array<ShapeNode, kMaxNodes> thrNodes {};
 
         bool operator== (const RelationSettings&) const = default;
 
@@ -129,6 +132,26 @@ namespace breath
             return n.gain * std::exp (-1.386f * d * d);   // demi-hauteur à ± largeur/2
         }
 
+        // Décalage du seuil à la fréquence f (points de façonnage du seuil).
+        float thresholdOffsetAt (float f) const noexcept
+        {
+            float v = 0.0f;
+            for (int i = 0; i < numThrNodes; ++i)
+                v += nodeShape (thrNodes[(size_t) i], f);
+            return v;
+        }
+
+        // Courbe de réduction en fonction du dépassement du seuil, avec knee (démarrage progressif).
+        static float kneeCurve (float over, float kneeDb) noexcept
+        {
+            if (kneeDb <= 0.01f) return juce::jmax (0.0f, over);
+            const float h = 0.5f * kneeDb;
+            if (over <= -h) return 0.0f;
+            if (over >= h)  return over;
+            const float t = over + h;
+            return t * t / (2.0f * kneeDb);
+        }
+
         // Réduction max effective à la fréquence f (base + points de façonnage).
         float maxAt (float f) const noexcept
         {
@@ -148,7 +171,8 @@ namespace breath
                            attackMs { 5.0f }, releaseMs { 120.0f },
                            lowHz { 20.0f }, highHz { 20000.0f }, lowSlope { 0.3f }, highSlope { 0.3f }, resolution { 0.6f };
         // Réduction max par bande (courbe façonnée), et facteur d'intensité associé.
-        std::array<std::atomic<float>, kNumBands> maxCurve {}, intensity {};
+        std::array<std::atomic<float>, kNumBands> maxCurve {}, intensity {}, thrOffset {};
+        std::atomic<float> knee { 0.0f };
 
         AtomicRelation() { store (RelationSettings {}); }
 
@@ -171,8 +195,10 @@ namespace breath
                 // Un point qui creuse plus (ou protège) agit aussi sur l'intensité, pas seulement sur le plafond.
                 intensity[(size_t) b].store (s.maxReduction > 0.01f ? m / s.maxReduction : (m > 0.0f ? 1.0f : 0.0f),
                                              std::memory_order_relaxed);
+                thrOffset[(size_t) b].store (s.thresholdOffsetAt (bandCentre (b)), std::memory_order_relaxed);
             }
             followOrder.store (s.followOrder, std::memory_order_relaxed);
+            knee.store (s.knee, std::memory_order_relaxed);
             hard.store (s.hard, std::memory_order_relaxed);
             masking.store (s.masking, std::memory_order_relaxed);
             autoThreshold.store (s.autoThreshold, std::memory_order_relaxed);
@@ -188,6 +214,7 @@ namespace breath
             RelationSettings s;
             s.enabled      = enabled.load (std::memory_order_acquire);
             s.followOrder  = followOrder.load (std::memory_order_relaxed);
+            s.knee         = knee.load (std::memory_order_relaxed);
             s.assigned     = assigned.load (std::memory_order_relaxed);
             s.hard         = hard.load (std::memory_order_relaxed);
             s.masking      = masking.load (std::memory_order_relaxed);

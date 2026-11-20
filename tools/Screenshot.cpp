@@ -72,6 +72,9 @@ int main (int argc, char** argv)
         s.numNodes = 1;
         s.nodes[0] = { 110.0f, -3.5f, 0.8f };
         s.lowSlope = 0.15f; s.highSlope = 1.2f;
+        s.knee = 8.0f;
+        s.numThrNodes = 1;
+        s.thrNodes[0] = { 90.0f, -8.0f, 1.0f };
         hub.setRelation (procs[0]->getSlot(), procs[1]->getSlot(), s);
         auto v = hub.getRelation (procs[2]->getSlot(), procs[1]->getSlot());
         v.lowHz = 300.0f; v.highHz = 3000.0f; v.followOrder = false; v.threshold = -45.0f; v.enabled = false;
@@ -117,6 +120,7 @@ int main (int argc, char** argv)
 
     auto* proc = procs[1].get();
     proc->currentView = 0;
+    proc->instUpper = procs[0]->getSlot();
     std::unique_ptr<juce::AudioProcessorEditor> editor (proc->createEditorAndMakeActive());
     editor->addToDesktop (0);
     editor->setVisible (true);

@@ -34,6 +34,15 @@ namespace breath
             t.setProperty ("detailHigh", r.detailHigh, nullptr);
             t.setProperty ("lowSlope", r.lowSlope, nullptr);
             t.setProperty ("highSlope", r.highSlope, nullptr);
+            t.setProperty ("knee", r.knee, nullptr);
+            for (int i = 0; i < r.numThrNodes; ++i)
+            {
+                juce::ValueTree n ("ThrNode");
+                n.setProperty ("f", r.thrNodes[(size_t) i].freq, nullptr);
+                n.setProperty ("g", r.thrNodes[(size_t) i].gain, nullptr);
+                n.setProperty ("w", r.thrNodes[(size_t) i].width, nullptr);
+                t.appendChild (n, nullptr);
+            }
             for (int i = 0; i < r.numNodes; ++i)
             {
                 juce::ValueTree n ("Node");
@@ -69,9 +78,14 @@ namespace breath
             r.detailHigh   = t.getProperty ("detailHigh", r.detailHigh);
             r.lowSlope     = t.getProperty ("lowSlope", r.lowSlope);
             r.highSlope    = t.getProperty ("highSlope", r.highSlope);
+            r.knee = t.getProperty ("knee", r.knee);
             for (const auto& n : t)
+            {
                 if (n.hasType ("Node") && r.numNodes < kMaxNodes)
                     r.nodes[(size_t) r.numNodes++] = { (float) n["f"], (float) n["g"], (float) n.getProperty ("w", 1.0f) };
+                if (n.hasType ("ThrNode") && r.numThrNodes < kMaxNodes)
+                    r.thrNodes[(size_t) r.numThrNodes++] = { (float) n["f"], (float) n["g"], (float) n.getProperty ("w", 1.0f) };
+            }
             return r;
         }
 

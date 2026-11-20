@@ -26,7 +26,7 @@ namespace breath::ui
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
     private:
-        enum class Target { none, lowEdge, highEdge, maxLine, threshold, node, selectOther, chip, addChip };
+        enum class Target { none, lowEdge, highEdge, maxLine, threshold, node, thrNode, knee, selectOther, chip, addChip };
         struct Hit { Target t = Target::none; int slot = -1; int node = -1; };
 
         juce::Rectangle<float> graphArea() const;
@@ -38,7 +38,8 @@ namespace breath::ui
         float yToRedDb (float y) const;
 
         Hit hitTest (juce::Point<float> p) const;
-        float thresholdAt (const RelationSettings& rel, int source, float x) const;
+        float thresholdAt (const RelationSettings& rel, int source, float x, int skipThrNode = -1) const;
+        juce::Point<float> kneeHandlePos (const RelationSettings& rel, int source) const;
         juce::Path curvePath (const float* values, std::function<float (float)> toY) const;
         void drawPill (juce::Graphics&, juce::Point<float> anchor, const juce::String&, juce::Colour, int align) const;
         void showAddMenu();

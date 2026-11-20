@@ -5,6 +5,11 @@ Chaque version est téléchargeable pour toujours dans l'onglet **Releases** du 
 Les projets enregistrés avec une version sont relus par les versions suivantes.
 Quand une version **change le son** à réglages identiques, c'est indiqué par ⚠️.
 
+## V0.2
+- Courbe de seuil façonnable par points (comme la courbe max) : ajout, déplacement, largeur, suppression.
+- Seuil « soft » : knee réglable sur le graphique (0 à 24 dB), avec bande de visualisation.
+- Aucun changement de son pour les projets V0.1.
+
 ## V0.1
 Première version numérotée. Elle regroupe tout le travail fait jusqu'ici :
 - Instances qui se trouvent toutes seules (mémoire partagée), jusqu'à 16, réparties en 5 familles

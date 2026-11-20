@@ -215,6 +215,9 @@ int main()
         s.numNodes = 1;
         s.nodes[0] = { 120.0f, -3.0f, 1.0f };     // point de façonnage : protège un peu 120 Hz
         s.lowSlope = 0.1f; s.highSlope = 1.5f;    // pentes : raide en bas, douce en haut
+        s.knee = 6.0f;                            // seuil « soft »
+        s.numThrNodes = 1;
+        s.thrNodes[0] = { 60.0f, -4.0f, 1.0f };   // seuil abaissé autour de 60 Hz
         hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), s);
     }
     // La voix travaille en 128 bandes (doit aussi être identique à l'export).
@@ -429,6 +432,26 @@ int main()
             check (std::abs (sep - ref) < 1.5f, "Familles : le kick (autre famille) ne creuse plus la basse");
             fam->setValueNotifyingHost (fam->convertTo0to1 (0.0f));
             hub.setFamily (rig[0].getSlot(), 0);
+        }
+
+        // Point sur la courbe de seuil : abaisser le seuil creuse davantage.
+        {
+            auto t = hub.getRelation (rig[0].getSlot(), rig[1].getSlot());
+            const auto saved = t;
+            t.numThrNodes = 0; t.knee = 0.0f; t.threshold = -20.0f; t.amount = 1.0f; t.maxReduction = 24.0f;
+            hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), t);
+            const float noNode = lowLevel (rig.render ({ 256 }, 0, 31), 1, lat);
+            t.numThrNodes = 1; t.thrNodes[0] = { 70.0f, -15.0f, 1.5f };
+            hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), t);
+            const float withNode = lowLevel (rig.render ({ 256 }, 0, 32), 1, lat);
+            std::printf ("        point de seuil -15 dB a 70 Hz : graves de la basse %.1f dB -> %.1f dB\n", noNode, withNode);
+            check (withNode < noNode - 2.0f, "Point sur la courbe de seuil : abaisse le seuil localement");
+            t.numThrNodes = 0; t.knee = 12.0f;
+            hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), t);
+            const float soft = lowLevel (rig.render ({ 256 }, 0, 33), 1, lat);
+            std::printf ("        knee 12 dB : graves de la basse %.1f dB (knee 0 : %.1f dB)\n", soft, noNode);
+            check (std::abs (soft - noNode) > 0.2f, "Knee : le seuil soft change bien la reduction");
+            hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), saved);
         }
 
         // Snapshots : copier A dans B.

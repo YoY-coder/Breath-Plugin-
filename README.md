@@ -48,7 +48,8 @@ Breath apparaît dans *Plug-ins → Breath*. Si vous remplacez une ancienne vers
   clic droit = bypass / retirer ; **« + »** = ajouter une piste ou **Self** (la piste se creuse elle-même).
 - **Directement sur le graphique** (relation sélectionnée) :
   - bords de la zone : glisser **↔ = fréquence**, **↕ = pente** (vers le haut = plus raide), comme sur Pro-MB ;
-  - ligne / courbe pointillée de couleur = seuil (en « Seuil auto », elle suit le spectre moyen de la source) ;
+  - ligne / courbe pointillée de couleur = seuil (en « Seuil auto », elle suit le spectre moyen de la source),
+    façonnable par points comme la courbe max ; poignée **≡** = **knee** (seuil soft) ;
   - **courbe bleue = réduction max**, façonnable comme un EQ : double-clic dessus = ajouter un point,
     glisser = fréquence / profondeur, molette = largeur, double-clic ou clic droit sur un point = supprimer ;
   - double-clic sur un bord ou sur le seuil = valeur par défaut, **Alt / Option** = réglage fin.
