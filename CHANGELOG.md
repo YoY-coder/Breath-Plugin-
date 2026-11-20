@@ -1,6 +1,7 @@
 # Journal des versions de Breath
 
-Chaque version est téléchargeable pour toujours dans l'onglet **Releases** du dépôt.
+Chaque version est téléchargeable pour toujours dans l'onglet **Releases** du dépôt
+(publiée automatiquement quand le numéro de version change).
 Les projets enregistrés avec une version sont relus par les versions suivantes.
 Quand une version **change le son** à réglages identiques, c'est indiqué par ⚠️.
 

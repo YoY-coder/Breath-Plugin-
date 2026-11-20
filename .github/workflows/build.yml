@@ -3,7 +3,6 @@ name: Build
 on:
   push:
     branches: ["**"]
-    tags: ["V*", "v*"]
   pull_request:
   workflow_dispatch:
 
@@ -89,10 +88,11 @@ jobs:
           unzip -q pluginval.zip
           ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process build/Breath_artefacts/Release/VST3/Breath.vst3
 
-  # Version publiée (tag vX.Y) : fichiers téléchargeables pour toujours dans « Releases ».
+  # Version publiée : quand le numéro de version (CMakeLists.txt) n'a encore jamais été publié,
+  # on crée la version « VX.Y » dans l'onglet Releases, avec les fichiers Windows et Mac (gardés pour toujours).
   release:
     name: Publier la version
-    if: startsWith(github.ref, 'refs/tags/V') || startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push'
     needs: [tests, windows, macos]
     runs-on: ubuntu-24.04
     permissions:
@@ -100,20 +100,38 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FULL=$(grep -oP 'project\(Breath VERSION \K[0-9]+\.[0-9]+' CMakeLists.txt)
+          echo "tag=V$FULL" >> "$GITHUB_OUTPUT"
+          if gh release view "V$FULL" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || [ ! -f "docs/release-notes/V$FULL.md" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"; echo "V$FULL déjà publiée (ou pas de notes) : rien à faire."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/download-artifact@v5
+        if: steps.v.outputs.publish == 'true'
         with:
           path: artifacts
 
       - name: Package
+        if: steps.v.outputs.publish == 'true'
         run: |
-          V="${GITHUB_REF_NAME#[vV]}"
-          cd artifacts/Breath-Windows && zip -qr "../../Breath-V${V}-Windows.zip" Breath.vst3 && cd ../..
-          cp artifacts/Breath-macOS/Breath-mac.zip "Breath-V${V}-macOS.zip"
+          T="${{ steps.v.outputs.tag }}"
+          (cd artifacts/Breath-Windows && zip -qr "../../Breath-${T}-Windows.zip" Breath.vst3)
+          cp artifacts/Breath-macOS/Breath-mac.zip "Breath-${T}-macOS.zip"
           ls -la *.zip
 
       - name: Create release
+        if: steps.v.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: Breath ${{ github.ref_name }}
-          body_path: docs/release-notes/${{ github.ref_name }}.md
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Breath ${{ steps.v.outputs.tag }}
+          body_path: docs/release-notes/${{ steps.v.outputs.tag }}.md
           files: Breath-V*.zip
