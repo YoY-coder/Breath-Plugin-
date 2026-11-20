@@ -353,6 +353,96 @@ int main()
     }
 
 
+    // --- 5b. Pas de clic : kick + sub pur ----------------------------------
+    {
+        rig.stopAll();
+        std::unique_ptr<BreathAudioProcessor> kick (static_cast<BreathAudioProcessor*> (createPluginFilter()));
+        std::unique_ptr<BreathAudioProcessor> sub (static_cast<BreathAudioProcessor*> (createPluginFilter()));
+        FakePlayHead hk, hs;
+        for (auto* pr : { kick.get(), sub.get() })
+        {
+            pr->setPlayConfigDetails (2, 2, kSr, 256);
+            pr->prepareToPlay (kSr, 256);
+        }
+        kick->setPlayHead (&hk);
+        sub->setPlayHead (&hs);
+        auto setRank = [] (BreathAudioProcessor& p, int r) { auto* q = p.getParams().getParameter ("priority"); q->setValueNotifyingHost (q->convertTo0to1 ((float) r)); };
+        setRank (*kick, 1);
+        setRank (*sub, 2);
+        // On isole ce couple dans sa propre famille pour ne pas être influencé par les autres instances.
+        if (auto* fam = kick->getParams().getParameter ("family")) { fam->setValueNotifyingHost (fam->convertTo0to1 (1.0f)); }
+        if (auto* fam = sub->getParams().getParameter ("family"))  { fam->setValueNotifyingHost (fam->convertTo0to1 (1.0f)); }
+        // Les autres instances ne doivent pas creuser ce couple : relations depuis rig désactivées.
+        for (int i = 0; i < kNum; ++i)
+            for (auto* pr : { kick.get(), sub.get() })
+            {
+                auto r = hub.getRelation (rig[i].getSlot(), pr->getSlot()); r.enabled = false; hub.setRelation (rig[i].getSlot(), pr->getSlot(), r);
+            }
+        auto rel = hub.getRelation (kick->getSlot(), sub->getSlot());
+        rel.enabled = true; rel.amount = 1.0f; rel.maxReduction = 12.0f; rel.threshold = -40.0f;
+        rel.attackMs = 2.0f; rel.releaseMs = 60.0f; rel.lowHz = 20.0f; rel.highHz = 200.0f; rel.resolution = 0.8f;
+        hub.setRelation (kick->getSlot(), sub->getSlot(), rel);
+
+        const int n = 256, len = ((int) kSr * 3 / n) * n;
+        std::vector<float> out ((size_t) len);
+        juce::AudioBuffer<float> bk (2, n), bs (2, n);
+        juce::MidiBuffer m;
+        const float twoPi = juce::MathConstants<float>::twoPi;
+        for (int pos = 0; pos < len; pos += n)
+        {
+            for (int k = 0; k < n; ++k)
+            {
+                const float t = (float) (pos + k) / (float) kSr;
+                const float tb = std::fmod (t, 0.375f);
+                const float kv = 0.9f * std::exp (-tb * 18.0f) * std::sin (twoPi * 55.0f * tb);
+                const float sv = 0.8f * std::sin (twoPi * 45.0f * t);
+                bk.setSample (0, k, kv); bk.setSample (1, k, kv);
+                bs.setSample (0, k, sv); bs.setSample (1, k, sv);
+            }
+            hk.time = hs.time = pos;
+            kick->processBlock (bk, m);
+            sub->processBlock (bs, m);
+            for (int k = 0; k < n; ++k)
+                out[(size_t) (pos + k)] = bs.getSample (0, k);
+        }
+        // Dérivée seconde : une sinusoïde à 45 Hz en a une très petite ; un clic / zipper la fait exploser.
+        const float ref = 0.8f * std::pow (twoPi * 45.0f / (float) kSr, 2.0f);
+        float worst = 0.0f, minLevel = 1.0f;
+        for (int i = (int) kSr / 2; i < len; ++i)
+            worst = juce::jmax (worst, std::abs (out[(size_t) i] - 2.0f * out[(size_t) i - 1] + out[(size_t) i - 2]));
+        for (int i = (int) kSr / 2; i < len; i += 64)
+            minLevel = juce::jmin (minLevel, std::abs (out[(size_t) i]) + 0.0f);
+        float peakDuck = 0.0f;
+        {
+            // réduction max observée (enveloppe crête par fenêtre de 1/45 s)
+            const int w = (int) (kSr / 45.0);
+            for (int i = (int) kSr / 2; i + w < len; i += w)
+            {
+                float pk = 0.0f;
+                for (int k = 0; k < w; ++k) pk = juce::jmax (pk, std::abs (out[(size_t) (i + k)]));
+                peakDuck = juce::jmax (peakDuck, 20.0f * std::log10 (0.8f / juce::jmax (pk, 1e-6f)));
+            }
+        }
+        if (std::getenv ("BREATH_DEBUG_CLICKS"))
+        {
+            int shown = 0;
+            for (int i = (int) kSr / 2; i < len && shown < 25; ++i)
+            {
+                const float d2 = std::abs (out[(size_t) i] - 2.0f * out[(size_t) i - 1] + out[(size_t) i - 2]);
+                if (d2 > 10.0f * ref)
+                {
+                    std::printf ("          pic %6.1fx a %d (mod 32 = %d, mod 128 = %d, mod 512 = %d, dans le temps = %.3f s)\n",
+                                 d2 / ref, i, i % 32, i % 128, i % 512, std::fmod ((double) i / kSr, 0.375));
+                    ++shown;
+                    i += 200;
+                }
+            }
+        }
+        std::printf ("        kick + sub : reduction max %.1f dB, discontinuite max = %.1f x la normale\n", peakDuck, worst / ref);
+        check (peakDuck > 6.0f, "Kick + sub : le sub est bien creuse");
+        check (worst / ref < 6.0f, "Kick + sub : aucun clic (avant correction : 127x la normale)");
+    }
+
     // --- 6. Performance : 12 instances, toutes les relations actives ---------
     {
         rig.stopAll();

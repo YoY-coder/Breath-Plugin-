@@ -220,7 +220,7 @@ void BreathAudioProcessor::publishFrame (int64_t s)
 {
     FrameData d;
     const int64_t frameIndex = floorDiv (s + 1, kHop) - 1;
-    analyzer.compute (d.bands, floorMod (frameIndex, Analyzer::kLowsEvery) == 0);
+    analyzer.compute (d.bands, (int) floorMod (frameIndex, Analyzer::kLowsEvery));
     d.rank = blockRank;
     d.macro = blockMacro;
     d.bypassAll = blockBypassAll;
@@ -622,20 +622,21 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         float wL, wR;
         if (right == nullptr)
         {
-            wL = wR = bank.process (0, dL);
+            wL = wR = bank.processMono (dL);
         }
         else if (mode == 1 || mode == 2)
         {
             float mid = 0.5f * (dL + dR), side = 0.5f * (dL - dR);
-            if (mode == 1) mid = bank.process (0, mid);
-            else           side = bank.process (0, side);
+            if (mode == 1) mid = bank.processMono (mid);
+            else           side = bank.processMono (side);
             wL = mid + side;
             wR = mid - side;
         }
         else
         {
-            wL = bank.process (0, dL);
-            wR = bank.process (1, dR);
+            wL = dL;
+            wR = dR;
+            bank.processStereo (wL, wR);
         }
 
         auto smooth = [this] (float& v, float target)

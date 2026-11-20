@@ -98,20 +98,28 @@ namespace breath
     {
         std::fill (history.begin(), history.end(), 0.0f);
         lows.fill (kSilenceDb);
+        lowsPrev.fill (kSilenceDb);
         writePos = 0;
     }
 
-    void Analyzer::compute (float* bandsDb, bool updateLows) noexcept
+    void Analyzer::compute (float* bandsDb, int phase) noexcept
     {
         shortFft.run (history, writePos, mask, bandsDb);
-        if (updateLows)
+        if (phase == 0)
+        {
+            lowsPrev = lows;
             longFft.run (history, writePos, mask, lows.data());
+        }
 
+        const float t = (float) (phase + 1) / (float) kLowsEvery;
         for (int b = 0; b < kNumBands; ++b)
         {
             const float w = blend[(size_t) b];
             if (w > 0.0f)
-                bandsDb[b] = w * lows[(size_t) b] + (1.0f - w) * bandsDb[b];
+            {
+                const float lo = lowsPrev[(size_t) b] + (lows[(size_t) b] - lowsPrev[(size_t) b]) * t;
+                bandsDb[b] = w * lo + (1.0f - w) * bandsDb[b];
+            }
         }
     }
 }
