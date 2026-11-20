@@ -48,6 +48,7 @@ namespace breath::ui
         familyBtn.onClick = [this]
         {
             juce::PopupMenu m;
+            m.addSectionHeader (juce::String ("Breath V") + breathVersion());
             m.addSectionHeader ("Famille");
             for (int f = 0; f < kNumFamilies; ++f)
                 m.addItem (f + 1, BreathHub::familyGlyph (f) + "  " + BreathHub::familyName (f)

@@ -22,6 +22,13 @@ namespace breath::ui
 
     enum class Weight { regular, medium, semibold };
 
+    // Version affichée : « 0.1 » (majeur.mineur).
+    inline juce::String breathVersion()
+    {
+        const auto v = juce::StringArray::fromTokens (JucePlugin_VersionString, ".", "");
+        return v.size() >= 2 ? v[0] + "." + v[1] : juce::String (JucePlugin_VersionString);
+    }
+
     juce::Font font (float height, Weight w = Weight::regular);
 
     // Largeur d'un texte dans une police.

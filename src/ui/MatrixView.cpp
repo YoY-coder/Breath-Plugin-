@@ -67,6 +67,10 @@ namespace breath::ui
 
     void HierarchyList::paint (juce::Graphics& g)
     {
+        g.setColour (colours::text3);
+        g.setFont (font (10.0f));
+        g.drawText ("Breath V" + breathVersion(), getLocalBounds().toFloat().reduced (16.0f, 10.0f).removeFromBottom (14.0f),
+                    juce::Justification::centredLeft);
         drawCaption (g, juce::String::fromUTF8 ("Hiérarchie"), { 16.0f, 8.0f, 200.0f, 16.0f });
         const int master = hub.getMaster (proc.getFamily());
         const int me = proc.getSlot();

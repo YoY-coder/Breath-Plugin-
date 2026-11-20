@@ -2,6 +2,8 @@ name: Build
 
 on:
   push:
+    branches: ["**"]
+    tags: ["V*", "v*"]
   pull_request:
   workflow_dispatch:
 
@@ -86,3 +88,32 @@ jobs:
           curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
           unzip -q pluginval.zip
           ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process build/Breath_artefacts/Release/VST3/Breath.vst3
+
+  # Version publiée (tag vX.Y) : fichiers téléchargeables pour toujours dans « Releases ».
+  release:
+    name: Publier la version
+    if: startsWith(github.ref, 'refs/tags/V') || startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, windows, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+
+      - name: Package
+        run: |
+          V="${GITHUB_REF_NAME#[vV]}"
+          cd artifacts/Breath-Windows && zip -qr "../../Breath-V${V}-Windows.zip" Breath.vst3 && cd ../..
+          cp artifacts/Breath-macOS/Breath-mac.zip "Breath-V${V}-macOS.zip"
+          ls -la *.zip
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Breath ${{ github.ref_name }}
+          body_path: docs/release-notes/${{ github.ref_name }}.md
+          files: Breath-V*.zip

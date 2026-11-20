@@ -772,6 +772,7 @@ void BreathAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::ValueTree state ("BreathState");
     state.setProperty ("version", 2, nullptr);
+    state.setProperty ("pluginVersion", JucePlugin_VersionString, nullptr);   // version de Breath qui a enregistré le projet
     state.setProperty ("id", instanceId.toString(), nullptr);
     state.setProperty ("seq", creationSeq, nullptr);
     state.setProperty ("editorWidth", savedEditorWidth, nullptr);
