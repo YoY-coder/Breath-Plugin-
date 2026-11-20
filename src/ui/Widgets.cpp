@@ -96,22 +96,34 @@ namespace breath::ui
     //==========================================================================
     void SnapshotButtons::paint (juce::Graphics& g)
     {
-        const char* names[] = { "A", "B", "C" };
-        const float w = 24.0f, gap = 3.0f;
-        for (int i = 0; i < 3; ++i)
+        const char* names[] = { "A", "B" };
+        const float w = 24.0f, gap = 3.0f, y = ((float) getHeight() - w) / 2.0f;
+        for (int i = 0; i < 2; ++i)
         {
-            auto r = juce::Rectangle<float> ((w + gap) * (float) i, ((float) getHeight() - w) / 2.0f, w, w);
+            auto r = juce::Rectangle<float> ((w + gap) * (float) i, y, w, w);
             g.setColour (i == active ? colours::accent : colours::panel2);
             g.fillRoundedRectangle (r, 7.0f);
             g.setColour (i == active ? juce::Colours::white : colours::text2);
             g.setFont (font (11.0f, Weight::semibold));
             g.drawText (names[i], r, juce::Justification::centred, false);
         }
+        // « A→B » : copier A dans B
+        auto c = juce::Rectangle<float> (2.0f * (w + gap) + 4.0f, y, (float) getWidth() - (2.0f * (w + gap) + 4.0f), w);
+        g.setColour (colours::panel2);
+        g.fillRoundedRectangle (c, 7.0f);
+        g.setColour (colours::text2);
+        g.setFont (font (10.0f, Weight::semibold));
+        g.drawText (juce::String::fromUTF8 ("A→B"), c, juce::Justification::centred, false);
     }
 
     void SnapshotButtons::mouseDown (const juce::MouseEvent& e)
     {
-        const int i = juce::jlimit (0, 2, (int) (e.position.x / 27.0f));
+        if (e.position.x > 2.0f * 27.0f + 2.0f)
+        {
+            if (onCopy) onCopy();
+            return;
+        }
+        const int i = juce::jlimit (0, 1, (int) (e.position.x / 27.0f));
         if (onSelect)
             onSelect (i);
     }

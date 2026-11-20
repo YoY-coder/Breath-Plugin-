@@ -29,7 +29,7 @@ namespace breath::ui
 
         juce::Slider mix, makeup, lookahead;
         juce::AudioProcessorValueTreeState::SliderAttachment mixAtt, makeupAtt, lookAtt;
-        ParamSwitch autoMakeup;
+        ParamSwitch autoMakeup, autoLook;
         ParamSegmented stereo, bands;
         ParamSwitch delta, bypass;
 
@@ -37,5 +37,6 @@ namespace breath::ui
         juce::Rectangle<float> panelCard;
         int lastSync = -1;
         float lastAuto = -1.0f;
+        bool lastBypassed = false;
     };
 }

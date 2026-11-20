@@ -38,6 +38,7 @@ private:
     juce::VBlankAttachment vblank;
     int frame = 0;
     bool ready = false;   // taille initiale appliquée
+    int shownFamily = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BreathAudioProcessorEditor)
 };

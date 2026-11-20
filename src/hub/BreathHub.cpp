@@ -25,6 +25,13 @@ namespace breath
             t.setProperty ("high", r.highHz, nullptr);
             t.setProperty ("resolution", r.resolution, nullptr);
             t.setProperty ("follow", r.followOrder, nullptr);
+            t.setProperty ("assigned", r.assigned, nullptr);
+            t.setProperty ("hard", r.hard, nullptr);
+            t.setProperty ("masking", r.masking, nullptr);
+            t.setProperty ("autoThr", r.autoThreshold, nullptr);
+            t.setProperty ("autoOffset", r.autoOffset, nullptr);
+            t.setProperty ("detailLow", r.detailLow, nullptr);
+            t.setProperty ("detailHigh", r.detailHigh, nullptr);
             t.setProperty ("lowSlope", r.lowSlope, nullptr);
             t.setProperty ("highSlope", r.highSlope, nullptr);
             for (int i = 0; i < r.numNodes; ++i)
@@ -51,6 +58,15 @@ namespace breath
             r.highHz       = t.getProperty ("high", r.highHz);
             r.resolution   = t.getProperty ("resolution", r.resolution);
             r.followOrder  = t.getProperty ("follow", r.followOrder);
+            // Anciens projets : « désactivée » voulait dire « retirée ».
+            if (t.hasProperty ("assigned")) r.assigned = t["assigned"];
+            else { r.assigned = r.enabled; r.enabled = true; }
+            r.hard         = t.getProperty ("hard", r.hard);
+            r.masking      = t.getProperty ("masking", r.masking);
+            r.autoThreshold = t.getProperty ("autoThr", r.autoThreshold);
+            r.autoOffset   = t.getProperty ("autoOffset", r.autoOffset);
+            r.detailLow    = t.getProperty ("detailLow", r.detailLow);
+            r.detailHigh   = t.getProperty ("detailHigh", r.detailHigh);
             r.lowSlope     = t.getProperty ("lowSlope", r.lowSlope);
             r.highSlope    = t.getProperty ("highSlope", r.highSlope);
             for (const auto& n : t)
@@ -148,6 +164,7 @@ namespace breath
             std::vector<std::pair<Key, RelationSettings>> copies;
             for (auto& [k, v] : relationModel)
             {
+                if (k.first == wanted && k.second == wanted) { copies.push_back ({ { newId, newId }, v }); continue; }
                 if (k.first == wanted)  copies.push_back ({ { newId, k.second }, v });
                 if (k.second == wanted) copies.push_back ({ { k.first, newId }, v });
             }
@@ -197,12 +214,41 @@ namespace breath
         sendChangeMessage();
     }
 
-    int BreathHub::numActive() const noexcept
+    int BreathHub::numActive (int family) const noexcept
     {
         int n = 0;
         for (auto& sl : slots)
-            n += sl.active.load() ? 1 : 0;
+            n += (sl.active.load() && (family < 0 || sl.family.load() == family)) ? 1 : 0;
         return n;
+    }
+
+    void BreathHub::setFamily (int s, int f)
+    {
+        if (! isActive (s))
+            return;
+        f = juce::jlimit (0, kNumFamilies - 1, f);
+        if (slots[(size_t) s].family.load() == f)
+            return;
+        slots[(size_t) s].family.store (f);
+        refresh();
+    }
+
+    juce::String BreathHub::familyName (int f)
+    {
+        const char* names[] = { "Alpha", "B\xc3\xaata", "Gamma", "Sigma", "Om\xc3\xa9ga" };
+        return juce::String::fromUTF8 (names[juce::jlimit (0, kNumFamilies - 1, f)]);
+    }
+
+    juce::String BreathHub::familyGlyph (int f)
+    {
+        const char* glyphs[] = { "\xce\xb1", "\xce\xb2", "\xce\xb3", "\xcf\x83", "\xcf\x89" };   // α β γ σ ω
+        return juce::String::fromUTF8 (glyphs[juce::jlimit (0, kNumFamilies - 1, f)]);
+    }
+
+    juce::Colour BreathHub::familyColour (int f)
+    {
+        const juce::uint32 c[] = { 0xff0a84ff, 0xff2ec4b6, 0xffa27bff, 0xffffb340, 0xffff6b8b };
+        return juce::Colour (c[juce::jlimit (0, kNumFamilies - 1, f)]);
     }
 
     juce::String BreathHub::displayName (int s) const
@@ -240,11 +286,11 @@ namespace breath
         return ra != rb ? ra < rb : ia.seq < ib.seq;
     }
 
-    std::vector<int> BreathHub::hierarchy() const
+    std::vector<int> BreathHub::hierarchy (int family) const
     {
         std::vector<int> order;
         for (int i = 0; i < kMaxInstances; ++i)
-            if (slots[(size_t) i].active.load())
+            if (slots[(size_t) i].active.load() && (family < 0 || slots[(size_t) i].family.load() == family))
                 order.push_back (i);
         std::sort (order.begin(), order.end(), [this] (int a, int b) { return isAbove (a, b); });
         return order;
@@ -264,12 +310,34 @@ namespace breath
     RelationSettings BreathHub::getRelation (int upper, int lower) const
     {
         auto it = relationModel.find (keyFor (upper, lower));
-        return it != relationModel.end() ? it->second : RelationSettings {};
+        if (it != relationModel.end())
+            return it->second;
+        RelationSettings d;
+        if (upper == lower)
+        {
+            // « Self » : non assignée par défaut, indépendante de la hiérarchie.
+            d.assigned = false;
+            d.followOrder = false;
+        }
+        return d;
+    }
+
+    bool BreathHub::isRelationVisible (int source, int target) const
+    {
+        if (! isActive (source) || ! isActive (target) || familyOf (source) != familyOf (target))
+            return false;
+        const auto r = getRelation (source, target);
+        return source == target ? r.assigned : r.isVisible (isAbove (source, target));
+    }
+
+    bool BreathHub::isRelationActive (int source, int target) const
+    {
+        return isRelationVisible (source, target) && getRelation (source, target).enabled;
     }
 
     void BreathHub::setRelation (int upper, int lower, const RelationSettings& s)
     {
-        if (! isActive (upper) || ! isActive (lower) || upper == lower)
+        if (! isActive (upper) || ! isActive (lower))
             return;
         relationModel[keyFor (upper, lower)] = s;
         relations[(size_t) upper][(size_t) lower].store (s);
@@ -278,19 +346,28 @@ namespace breath
 
     void BreathHub::toggleRelation (int source, int target)
     {
-        if (! isActive (source) || ! isActive (target) || source == target)
+        if (! isActive (source) || ! isActive (target))
             return;
         auto s = getRelation (source, target);
-        const bool above = isAbove (source, target);
-        if (s.isActive (above))
+        if (source == target)
         {
-            if (above) s.enabled = false;        // relation « normale » : on la coupe
-            else       s.followOrder = true;     // relation vers le haut : retour en veille
+            s.assigned = ! s.assigned;          // Self
+            s.enabled = true;
         }
         else
         {
-            s.enabled = true;
-            s.followOrder = above;               // vers le haut : active quelle que soit la hiérarchie
+            const bool above = isAbove (source, target);
+            if (s.isVisible (above))
+            {
+                if (above) s.assigned = false;   // relation « normale » : on la retire
+                else       s.followOrder = true; // relation vers le haut : retour en veille
+            }
+            else
+            {
+                s.assigned = true;
+                s.enabled = true;
+                s.followOrder = above;           // vers le haut : active quelle que soit la hiérarchie
+            }
         }
         beginEdit();
         setRelation (source, target, s);
@@ -301,19 +378,21 @@ namespace breath
     {
         for (int u = 0; u < kMaxInstances; ++u)
             for (int l = 0; l < kMaxInstances; ++l)
-                if (u != l && slots[(size_t) u].active.load() && slots[(size_t) l].active.load())
+                if (slots[(size_t) u].active.load() && slots[(size_t) l].active.load())
                     relations[(size_t) u][(size_t) l].store (getRelation (u, l));
     }
 
-    int BreathHub::getMaster() const
+    int BreathHub::getMaster (int family) const
     {
-        const int m = slotForId (masterId);
-        if (m >= 0)
+        family = juce::jlimit (0, kNumFamilies - 1, family);
+        const int m = slotForId (masterIds[(size_t) family]);
+        if (m >= 0 && slots[(size_t) m].family.load() == family)
             return m;
 
         int best = -1;
         for (int i = 0; i < kMaxInstances; ++i)
-            if (slots[(size_t) i].active.load() && (best < 0 || infos[(size_t) i].seq < infos[(size_t) best].seq))
+            if (slots[(size_t) i].active.load() && slots[(size_t) i].family.load() == family
+                && (best < 0 || infos[(size_t) i].seq < infos[(size_t) best].seq))
                 best = i;
         return best;
     }
@@ -323,39 +402,40 @@ namespace breath
         if (! isActive (s))
             return;
         beginEdit();
-        masterId = infos[(size_t) s].id.toString();
+        masterIds[(size_t) familyOf (s)] = infos[(size_t) s].id.toString();
         modelChanged (false);
         endEdit();
     }
 
     void BreathHub::updateMasterSlot()
     {
-        masterSlot.store (getMaster());
+        for (int f = 0; f < kNumFamilies; ++f)
+            masterSlots[(size_t) f].store (getMaster (f));
     }
 
-    float BreathHub::getGlobalMacro() const
+    float BreathHub::getGlobalMacro (int family) const
     {
-        const int m = getMaster();
+        const int m = getMaster (family);
         return (m >= 0 && infos[(size_t) m].client != nullptr) ? infos[(size_t) m].client->getMacro() : 1.0f;
     }
 
-    void BreathHub::setGlobalMacro (float v)
+    void BreathHub::setGlobalMacro (int family, float v)
     {
-        const int m = getMaster();
+        const int m = getMaster (family);
         if (m >= 0 && infos[(size_t) m].client != nullptr)
             infos[(size_t) m].client->setMacroFromHub (v);
         sendChangeMessage();
     }
 
-    bool BreathHub::getGlobalBypassAll() const
+    bool BreathHub::getGlobalBypassAll (int family) const
     {
-        const int m = getMaster();
+        const int m = getMaster (family);
         return m >= 0 && infos[(size_t) m].client != nullptr && infos[(size_t) m].client->getBypassAll();
     }
 
-    void BreathHub::setGlobalBypassAll (bool b)
+    void BreathHub::setGlobalBypassAll (int family, bool b)
     {
-        const int m = getMaster();
+        const int m = getMaster (family);
         if (m >= 0 && infos[(size_t) m].client != nullptr)
             infos[(size_t) m].client->setBypassAllFromHub (b);
         sendChangeMessage();
@@ -379,9 +459,23 @@ namespace breath
         sendChangeMessage();
     }
 
+    void BreathHub::copySnapshot (int from, int to)
+    {
+        from = juce::jlimit (0, 1, from);
+        to = juce::jlimit (0, 1, to);
+        if (from == to)
+            return;
+        beginEdit();
+        snapshots[(size_t) activeSnapshot] = captureState();
+        snapshots[(size_t) to] = snapshots[(size_t) from].createCopy();
+        if (activeSnapshot == to)
+            applyState (snapshots[(size_t) to], true);
+        endEdit();
+    }
+
     void BreathHub::selectSnapshot (int index)
     {
-        index = juce::jlimit (0, 2, index);
+        index = juce::jlimit (0, 1, index);
         if (index == activeSnapshot)
             return;
 
@@ -425,9 +519,11 @@ namespace breath
     juce::ValueTree BreathHub::captureState() const
     {
         juce::ValueTree st ("State");
-        st.setProperty ("master", masterId, nullptr);
+        for (int f = 0; f < kNumFamilies; ++f)
+            st.setProperty ("master" + juce::String (f), masterIds[(size_t) f], nullptr);
         st.setProperty ("snapshot", activeSnapshot, nullptr);
-        st.setProperty ("macro", getGlobalMacro(), nullptr);
+        for (int f = 0; f < kNumFamilies; ++f)
+            st.setProperty ("macro" + juce::String (f), getGlobalMacro (f), nullptr);
 
         for (auto& [k, v] : relationModel)
             st.appendChild (relationToTree (k.first, k.second, v), nullptr);
@@ -453,7 +549,8 @@ namespace breath
             if (c.hasType ("Relation"))
                 relationModel[{ c["src"].toString(), c["dst"].toString() }] = treeToRelation (c);
 
-        masterId = st["master"].toString();
+        for (int f = 0; f < kNumFamilies; ++f)
+            masterIds[(size_t) f] = st.getProperty ("master" + juce::String (f), f == 0 ? st["master"].toString() : juce::String()).toString();
 
         if (includeRanksAndMacro)
         {
@@ -465,8 +562,9 @@ namespace breath
                     infos[(size_t) s].client->setRankFromHub ((int) r["rank"]);
             }
 
-            if (st.hasProperty ("macro"))
-                setGlobalMacro ((float) st["macro"]);
+            for (int f = 0; f < kNumFamilies; ++f)
+                if (st.hasProperty ("macro" + juce::String (f)))
+                    setGlobalMacro (f, (float) st["macro" + juce::String (f)]);
         }
 
         modelChanged (false);
@@ -522,10 +620,14 @@ namespace breath
                 if (c.hasType ("Relation"))
                     relationModel[{ c["src"].toString(), c["dst"].toString() }] = treeToRelation (c);
 
-            if (st["master"].toString().isNotEmpty())
-                masterId = st["master"].toString();
+            for (int f = 0; f < kNumFamilies; ++f)
+            {
+                const auto id = st.getProperty ("master" + juce::String (f), f == 0 ? st["master"].toString() : juce::String()).toString();
+                if (id.isNotEmpty())
+                    masterIds[(size_t) f] = id;
+            }
 
-            activeSnapshot = juce::jlimit (0, 2, (int) m.getProperty ("activeSnapshot", 0));
+            activeSnapshot = juce::jlimit (0, 1, (int) m.getProperty ("activeSnapshot", 0));
             const auto snaps = m.getChildWithName ("Snapshots");
             for (const auto& s : snaps)
             {

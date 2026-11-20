@@ -45,6 +45,7 @@ namespace breath::ui
         void drawLinearSlider (juce::Graphics&, int x, int y, int w, int h, float pos, float minPos, float maxPos,
                                juce::Slider::SliderStyle, juce::Slider&) override;
         int getSliderThumbRadius (juce::Slider&) override { return 7; }
+        void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos, float startAngle, float endAngle, juce::Slider&) override;
 
         void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
 

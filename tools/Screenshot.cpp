@@ -74,13 +74,19 @@ int main (int argc, char** argv)
         s.lowSlope = 0.15f; s.highSlope = 1.2f;
         hub.setRelation (procs[0]->getSlot(), procs[1]->getSlot(), s);
         auto v = hub.getRelation (procs[2]->getSlot(), procs[1]->getSlot());
-        v.lowHz = 300.0f; v.highHz = 3000.0f; v.followOrder = false; v.threshold = -45.0f;
+        v.lowHz = 300.0f; v.highHz = 3000.0f; v.followOrder = false; v.threshold = -45.0f; v.enabled = false;
         hub.setRelation (procs[2]->getSlot(), procs[1]->getSlot(), v);
         auto d = hub.getRelation (procs[1]->getSlot(), procs[2]->getSlot());
         d.enabled = false;
         hub.setRelation (procs[1]->getSlot(), procs[2]->getSlot(), d);
     }
     procs[1]->getParams().getParameter ("autoMakeup")->setValueNotifyingHost (1.0f);
+    {
+        // Self sur la basse (anti-résonances) pour l'aperçu.
+        auto self = hub.getRelation (procs[1]->getSlot(), procs[1]->getSlot());
+        self.assigned = true; self.autoThreshold = true; self.lowHz = 200.0f; self.highHz = 8000.0f;
+        hub.setRelation (procs[1]->getSlot(), procs[1]->getSlot(), self);
+    }
     auto* la = procs[1]->getParams().getParameter ("lookahead");
     la->setValueNotifyingHost (la->convertTo0to1 (5.0f));
 

@@ -353,6 +353,104 @@ int main()
     }
 
 
+    // --- 5c. Nouvelles fonctions ---------------------------------------------
+    {
+        rig.stopAll();
+        auto lowLevel = [&] (const std::vector<Signal>& fr, int track, int lat)
+        {
+            Signal o ((size_t) kLen);
+            for (int i = 0; i < kLen; ++i)
+                o[(size_t) i] = i + lat < kLen ? fr[(size_t) track][(size_t) (i + lat)] : std::array<float, 2> { 0.0f, 0.0f };
+            return lowEnergyDuringKicks (o);
+        };
+        const int lat = rig[1].getLatencyInSamples();
+        const float ref = lowEnergyDuringKicks (rig.inputs[1]);
+
+        // Bypass de relation : la relation reste en place mais ne creuse plus.
+        auto rel = hub.getRelation (rig[0].getSlot(), rig[1].getSlot());
+        rel.enabled = false;
+        hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), rel);
+        check (hub.isRelationVisible (rig[0].getSlot(), rig[1].getSlot()) && ! hub.isRelationActive (rig[0].getSlot(), rig[1].getSlot()),
+               "Bypass de relation : la relation reste affichee mais ne travaille plus");
+        float byp = lowLevel (rig.render ({ 256 }, 0, 21), 1, lat);
+        check (std::abs (byp - ref) < 1.5f, "Bypass de relation : la basse n'est plus creusee");
+        rel.enabled = true;
+
+        // Mode Hard : réduction franche, bien au-delà de 24 dB.
+        rel.hard = true; rel.maxReduction = 60.0f; rel.amount = 1.0f; rel.threshold = -60.0f;
+        hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), rel);
+        const float hard = lowLevel (rig.render ({ 256 }, 0, 22), 1, lat);
+        std::printf ("        mode Hard : graves de la basse %.1f dB -> %.1f dB\n", ref, hard);
+        check (ref - hard > 20.0f, "Mode Hard : la basse est creusee de plus de 20 dB");
+        rel.hard = false; rel.maxReduction = 9.0f; rel.amount = 0.8f; rel.threshold = -45.0f;
+
+        // Masking : la voix n'a presque pas de graves → le kick ne doit quasiment pas la creuser dans les graves.
+        {
+            auto kv = hub.getRelation (rig[0].getSlot(), rig[2].getSlot());
+            kv.assigned = true; kv.enabled = true; kv.lowHz = 20.0f; kv.highHz = 120.0f; kv.threshold = -40.0f; kv.amount = 1.0f;
+            kv.masking = false;
+            hub.setRelation (rig[0].getSlot(), rig[2].getSlot(), kv);
+            rig.render ({ 256 }, 0, 23);
+            const float without = rig[0].getHub().slot (rig[2].getSlot()).activityFrom[(size_t) rig[0].getSlot()].load();
+            kv.masking = true;
+            hub.setRelation (rig[0].getSlot(), rig[2].getSlot(), kv);
+            float peakWith = 0.0f;
+            rig.render ({ 256 }, 0, 24);
+            peakWith = rig[0].getHub().slot (rig[2].getSlot()).activityFrom[(size_t) rig[0].getSlot()].load();
+            std::printf ("        masking : reduction kick -> voix (graves) %.1f dB sans, %.1f dB avec\n", without, peakWith);
+            check (without > 1.0f && peakWith < 0.5f, "Masking : pas de creusage la ou la piste creusee n'a rien");
+            kv.masking = false;
+            hub.setRelation (rig[0].getSlot(), rig[2].getSlot(), kv);
+        }
+
+        // Self : la nappe de bruit se compresse elle-même.
+        {
+            auto self = hub.getRelation (rig[3].getSlot(), rig[3].getSlot());
+            check (! self.assigned, "Self desactive par defaut");
+            self.assigned = true; self.enabled = true; self.threshold = -60.0f; self.amount = 1.0f; self.maxReduction = 12.0f;
+            hub.setRelation (rig[3].getSlot(), rig[3].getSlot(), self);
+            const auto fr = rig.render ({ 256 }, 0, 25);
+            double ein = 0.0, eout = 0.0;
+            for (int i = (int) kSr; i < kLen; ++i) { ein += std::pow (rig.inputs[3][(size_t) i][0], 2.0f); eout += std::pow (fr[3][(size_t) i][0], 2.0f); }
+            const float drop = (float) (10.0 * std::log10 (ein / juce::jmax (eout, 1e-20)));
+            std::printf ("        Self : la nappe perd %.1f dB\n", drop);
+            check (drop > 3.0f, "Self : la piste se creuse elle-meme (compresseur)");
+            self.assigned = false;
+            hub.setRelation (rig[3].getSlot(), rig[3].getSlot(), self);
+        }
+
+        // Familles : une piste d'une autre famille ne creuse plus.
+        {
+            auto* fam = rig[0].getParams().getParameter ("family");
+            fam->setValueNotifyingHost (fam->convertTo0to1 (2.0f));
+            hub.setFamily (rig[0].getSlot(), 2);
+            check (! hub.isRelationActive (rig[0].getSlot(), rig[1].getSlot()), "Familles : pas de relation entre familles differentes");
+            const float sep = lowLevel (rig.render ({ 256 }, 0, 26), 1, lat);
+            check (std::abs (sep - ref) < 1.5f, "Familles : le kick (autre famille) ne creuse plus la basse");
+            fam->setValueNotifyingHost (fam->convertTo0to1 (0.0f));
+            hub.setFamily (rig[0].getSlot(), 0);
+        }
+
+        // Snapshots : copier A dans B.
+        hub.selectSnapshot (0);
+        auto a = hub.getRelation (rig[0].getSlot(), rig[1].getSlot());
+        a.amount = 0.33f;
+        hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), a);
+        hub.copySnapshot (0, 1);
+        hub.selectSnapshot (1);
+        check (std::abs (hub.getRelation (rig[0].getSlot(), rig[1].getSlot()).amount - 0.33f) < 1e-4f, "Snapshots : A copie dans B");
+        hub.selectSnapshot (0);
+        a.amount = 0.8f;
+        hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), a);
+
+        // Lookahead auto : latence = délai de synchro.
+        rig[1].getParams().getParameter ("autoLookahead")->setValueNotifyingHost (1.0f);
+        rig.render ({ 256 }, 0, 27);
+        check (rig[1].getLatencyInSamples() == hub.getSyncDelay(), "Lookahead auto = delai de synchro (" + juce::String (hub.getSyncDelay()) + " echantillons)");
+        rig[1].getParams().getParameter ("autoLookahead")->setValueNotifyingHost (0.0f);
+        rig.render ({ 256 }, 0, 28);
+    }
+
     // --- 5b. Pas de clic : kick + sub pur ----------------------------------
     {
         rig.stopAll();

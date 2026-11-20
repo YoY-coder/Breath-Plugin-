@@ -30,7 +30,28 @@ namespace breath::ui
         juce::Slider macro;
         juce::TextButton bypassAll { "Bypass all" };
 
+        // Lettre grecque de la famille (clic = changer de famille).
+        struct FamilyButton : juce::Component, juce::SettableTooltipClient
+        {
+            int family = 0;
+            std::function<void()> onClick;
+            void paint (juce::Graphics& g) override
+            {
+                auto r = getLocalBounds().toFloat();
+                const auto c = BreathHub::familyColour (family);
+                g.setColour (c.withAlpha (isMouseOver() ? 0.22f : 0.14f));
+                g.fillRoundedRectangle (r, 7.0f);
+                g.setColour (c);
+                g.setFont (font (15.0f, Weight::semibold));
+                g.drawText (BreathHub::familyGlyph (family), r.translated (0.0f, -1.0f), juce::Justification::centred);
+            }
+            void mouseUp (const juce::MouseEvent& e) override { if (getLocalBounds().contains (e.getPosition()) && onClick) onClick(); }
+            void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+            void mouseExit (const juce::MouseEvent&) override  { repaint(); }
+        } familyBtn;
+
         juce::Colour dot;
+        float dotX = 50.0f;
         int rankShown = 0;
         float macroShown = -1.0f;
     };

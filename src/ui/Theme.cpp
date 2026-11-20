@@ -141,6 +141,31 @@ namespace breath::ui
         }
     }
 
+    void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider& s)
+    {
+        // Petit potard : arc fin, valeur en couleur d'accent depuis le centre (bipolaire) ou le début.
+        const auto r = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h).reduced (3.0f);
+        const float radius = juce::jmin (r.getWidth(), r.getHeight()) / 2.0f;
+        const auto c = r.getCentre();
+        const bool bipolar = s.getMinimum() < 0.0 && s.getMaximum() > 0.0;
+        const float angle = a0 + pos * (a1 - a0);
+        const float from = bipolar ? (a0 + a1) * 0.5f : a0;
+
+        juce::Path bg;
+        bg.addCentredArc (c.x, c.y, radius, radius, 0.0f, a0, a1, true);
+        g.setColour (colours::line2);
+        g.strokePath (bg, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        juce::Path val;
+        val.addCentredArc (c.x, c.y, radius, radius, 0.0f, juce::jmin (from, angle), juce::jmax (from, angle), true);
+        g.setColour (s.isEnabled() ? colours::accent : colours::text3);
+        g.strokePath (val, juce::PathStrokeType (3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        const auto tip = c.getPointOnCircumference (radius - 7.0f, angle);
+        g.setColour (s.isEnabled() ? juce::Colours::white : colours::text2);
+        g.drawLine ({ c.getPointOnCircumference (radius * 0.2f, angle), tip }, 2.0f);
+    }
+
     void LookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool highlighted, bool)
     {
         // Interrupteur façon macOS.

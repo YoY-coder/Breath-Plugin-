@@ -74,6 +74,7 @@ namespace breath
     {
         std::atomic<bool> active { false };
         std::atomic<int>  creationSeq { 0 };
+        std::atomic<int>  family { 0 };                 // 0..4 : Alpha, Bêta, Gamma, Sigma, Oméga
         std::array<Frame, kRingFrames> ring;
         Frame live;                                     // dernière trame (affichage, transport arrêté)
         std::atomic<int64_t> liveCount { 0 };
@@ -116,7 +117,7 @@ namespace breath
         Slot& slot (int i) noexcept                             { return slots[(size_t) i]; }
         const Slot& slot (int i) const noexcept                 { return slots[(size_t) i]; }
         AtomicRelation& relation (int upper, int lower) noexcept { return relations[(size_t) upper][(size_t) lower]; }
-        int  getMasterSlot() const noexcept                     { return masterSlot.load (std::memory_order_relaxed); }
+        int  getMasterSlot (int family) const noexcept          { return masterSlots[(size_t) juce::jlimit (0, kNumFamilies - 1, family)].load (std::memory_order_relaxed); }
         int  getSyncDelay() const noexcept                      { return syncDelay.load (std::memory_order_relaxed); }
         void reportRealtimeBlockSize (int numSamples) noexcept;
 
@@ -140,36 +141,44 @@ namespace breath
         void setManualName (int slotIndex, const juce::String& name);
 
         bool isActive (int s) const noexcept { return s >= 0 && s < kMaxInstances && slots[(size_t) s].active.load(); }
-        int  numActive() const noexcept;
+        // family = -1 : toutes les familles.
+        int  numActive (int family = -1) const noexcept;
+        int  familyOf (int s) const noexcept { return isActive (s) ? slots[(size_t) s].family.load() : 0; }
+        void setFamily (int s, int family);
+        static juce::String familyName (int f);
+        static juce::String familyGlyph (int f);
+        static juce::Colour familyColour (int f);
         const InstanceInfo& info (int s) const { return infos[(size_t) s]; }
         juce::String displayName (int s) const;
         juce::Colour displayColour (int s) const;
 
         // Hiérarchie (du plus prioritaire au moins prioritaire), selon les paramètres Priorité.
-        std::vector<int> hierarchy() const;
+        std::vector<int> hierarchy (int family = -1) const;
         bool isAbove (int a, int b) const;   // a est-il au-dessus de b ?
         void reorder (const std::vector<int>& slotsInOrder);  // glisser-déposer
 
         RelationSettings getRelation (int upper, int lower) const;
-        // Relation active (en tenant compte de « suivre la hiérarchie »).
-        bool isRelationActive (int source, int target) const { return isActive (source) && isActive (target) && source != target
-                                                                       && getRelation (source, target).isActive (isAbove (source, target)); }
-        // Active / désactive une relation depuis la grille (gère « suivre la hiérarchie »).
+        // Relation affichée (assignée, pas en veille). source == target : relation « Self ».
+        bool isRelationVisible (int source, int target) const;
+        // Relation qui travaille réellement (affichée et pas en bypass).
+        bool isRelationActive (int source, int target) const;
+        // Ajoute / retire une relation (grille, menu « + ») en gérant « suivre la hiérarchie ».
         void toggleRelation (int source, int target);
         void setRelation (int upper, int lower, const RelationSettings& s);
 
-        int  getMaster() const;              // slot de l'instance maîtresse
+        int  getMaster (int family) const;   // slot de l'instance maîtresse de la famille
         void setMaster (int slotIndex);
 
-        // Macro et Bypass All globaux (portés par l'instance maîtresse).
-        float getGlobalMacro() const;
-        void  setGlobalMacro (float v);
-        bool  getGlobalBypassAll() const;
-        void  setGlobalBypassAll (bool b);
+        // Macro et Bypass All d'une famille (portés par son instance maîtresse).
+        float getGlobalMacro (int family) const;
+        void  setGlobalMacro (int family, float v);
+        bool  getGlobalBypassAll (int family) const;
+        void  setGlobalBypassAll (int family, bool b);
 
-        // Snapshots A / B / C.
+        // Snapshots A / B.
         int  getActiveSnapshot() const noexcept { return activeSnapshot; }
         void selectSnapshot (int index);
+        void copySnapshot (int from, int to);
         bool snapshotIsEmpty (int index) const { return ! snapshots[(size_t) index].isValid(); }
 
         // Undo / Redo : regrouper une modification (geste) en une étape.
@@ -201,13 +210,13 @@ namespace breath
 
         std::array<Slot, kMaxInstances> slots;
         std::array<std::array<AtomicRelation, kMaxInstances>, kMaxInstances> relations;
-        std::atomic<int> masterSlot { -1 };
+        std::array<std::atomic<int>, kNumFamilies> masterSlots {};
         std::atomic<int> syncDelay { kDefaultSyncDelay };
         std::atomic<bool> syncDelayMeasured { false };
 
         std::array<InstanceInfo, kMaxInstances> infos;
         std::map<Key, RelationSettings> relationModel;
-        juce::String masterId;
+        std::array<juce::String, kNumFamilies> masterIds;
         std::array<juce::ValueTree, 3> snapshots;
         int activeSnapshot = 0;
         int nextSeq = 1;

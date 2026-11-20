@@ -5,7 +5,8 @@ namespace breath::ui
     namespace
     {
         constexpr float kSpecTopDb = 0.0f, kSpecBottomDb = -84.0f;
-        constexpr float kRedScaleDb = 15.0f;       // réduction affichée sur 45 % de la hauteur
+        constexpr float kRedScaleSoft = 15.0f;     // réduction affichée sur 45 % de la hauteur (Soft)
+        constexpr float kRedScaleHard = 72.0f;     // en Hard, l'échelle s'étend jusqu'à 72 dB
         const float gridFreqs[] = { 50, 100, 200, 500, 1000, 2000, 5000, 10000 };
 
         juce::String hzText (float f)
@@ -68,13 +69,13 @@ namespace breath::ui
     float SpectrumView::redDbToY (float db) const
     {
         auto a = graphArea();
-        return a.getY() + 4.0f + db / kRedScaleDb * a.getHeight() * 0.45f;
+        return a.getY() + 4.0f + db / redScale * a.getHeight() * 0.45f;
     }
 
     float SpectrumView::yToRedDb (float y) const
     {
         auto a = graphArea();
-        return (y - a.getY() - 4.0f) / (a.getHeight() * 0.45f) * kRedScaleDb;
+        return (y - a.getY() - 4.0f) / (a.getHeight() * 0.45f) * redScale;
     }
 
     //==========================================================================
@@ -84,8 +85,10 @@ namespace breath::ui
         if (me < 0)
             return;
 
-        for (int s : hub.hierarchy())
-            if (s != me && hub.isRelationActive (s, me))
+        if (hub.isRelationVisible (me, me))
+            sources.push_back (me);                       // Self en premier
+        for (int s : hub.hierarchy (proc.getFamily()))
+            if (s != me && hub.isRelationVisible (s, me))
                 sources.push_back (s);
 
         auto& sel = proc.instUpper;
@@ -118,8 +121,13 @@ namespace breath::ui
             follow (own, f.bands);
 
         for (int u : sources)
-            if (readLive (hub.slot (u), f))
+            if (u != me && readLive (hub.slot (u), f))
                 follow (upper[(size_t) u], f.bands);
+        upper[(size_t) me] = own;
+
+        // Échelle de réduction : étendue en mode Hard.
+        const float wantScale = (proc.instUpper >= 0 && hub.getRelation (proc.instUpper, me).hard) ? kRedScaleHard : kRedScaleSoft;
+        redScale += (wantScale - redScale) * 0.25f;
 
         auto& curve = hub.slot (me).reductionCurve;
         for (int b = 0; b < kNumBands; ++b)
@@ -144,6 +152,24 @@ namespace breath::ui
             p.quadraticTo (pts[i], (pts[i] + pts[i + 1]) * 0.5f);
         p.lineTo (pts.back());
         return p;
+    }
+
+    float SpectrumView::thresholdAt (const RelationSettings& rel, int src, float x) const
+    {
+        if (! rel.autoThreshold)
+            return rel.threshold;
+        // Spectre de la source lissé sur ≈ 1 octave (approximation de ce que fait le moteur), + décalage.
+        const float bandPos = freqToBand (xToFreq (x));
+        const auto& sp = upper[(size_t) juce::jlimit (0, kMaxInstances - 1, src)];
+        double acc = 0.0, wsum = 0.0;
+        for (int b = 0; b < kNumBands; ++b)
+        {
+            const float dist = std::abs ((float) b - bandPos) / 12.0f;   // 12 bandes fines ≈ 1 octave
+            const float w = std::exp (-dist);
+            acc += w * sp[(size_t) b];
+            wsum += w;
+        }
+        return juce::jmax (-80.0f, (float) (acc / wsum) + rel.autoOffset);
     }
 
     void SpectrumView::drawPill (juce::Graphics& g, juce::Point<float> anchor, const juce::String& text, juce::Colour c, int align) const
@@ -196,7 +222,8 @@ namespace breath::ui
         for (int u : sources)
         {
             const auto rel = hub.getRelation (u, me);
-            const auto c = hub.displayColour (u);
+            if (! rel.enabled && u != sel) continue;          // relation en bypass : pas de zone
+            const auto c = rel.enabled ? hub.displayColour (u) : colours::text3;
             const float alpha = u == sel ? 0.07f : 0.035f;
             const float top = a.getY() - 8.0f, h = a.getHeight() + 8.0f;
             // Pondération réelle de la zone (bords en fondu) dessinée en dégradé continu.
@@ -234,6 +261,7 @@ namespace breath::ui
         // Spectres des pistes sources
         for (int u : sources)
         {
+            if (u == me || ! hub.getRelation (u, me).enabled) continue;
             g.setColour (hub.displayColour (u).withAlpha (u == sel ? 0.9f : 0.5f));
             g.strokePath (curvePath (upper[(size_t) u].data(), [this] (float db) { return specDbToY (db); }), juce::PathStrokeType (1.5f));
         }
@@ -256,7 +284,8 @@ namespace breath::ui
 
             g.setFont (font (9.0f));
             g.setColour (colours::accent.withAlpha (0.6f));
-            for (int d : { 0, 3, 6, 9, 12, 15 })
+            const bool hardScale = redScale > 30.0f;
+            for (int d : hardScale ? std::initializer_list<int> { 0, 12, 24, 36, 48, 60, 72 } : std::initializer_list<int> { 0, 3, 6, 9, 12, 15 })
             {
                 const float y = redDbToY ((float) d);
                 g.drawText (d == 0 ? juce::String ("0 dB") : "-" + juce::String (d),
@@ -302,20 +331,33 @@ namespace breath::ui
             if (lowHot)  slopeInfo (true);
             if (highHot) slopeInfo (false);
 
-            // Seuil
             const float hx = (x0 + x1) / 2.0f;
             const bool roomRight = x1 + 110.0f < a.getRight();
+
+            // Seuil (fixe : ligne ; auto : courbe qui suit le spectre moyen de la source)
             {
-                const float y = specDbToY (rel.threshold);
                 const float d[] = { 2.0f, 3.0f };
+                juce::Path thrPath;
+                const int steps = 80;
+                for (int i = 0; i <= steps; ++i)
+                {
+                    const float x = x0 + (x1 - x0) * (float) i / (float) steps;
+                    const float y = specDbToY (thresholdAt (rel, sel, x));
+                    if (i == 0) thrPath.startNewSubPath (x, y); else thrPath.lineTo (x, y);
+                }
+                juce::Path dashed;
+                juce::PathStrokeType (1.5f).createDashedStroke (dashed, thrPath, d, 2);
                 g.setColour (c);
-                g.drawDashedLine ({ x0, y, x1, y }, d, 2, 1.5f);
+                g.fillPath (dashed);
+                const float y = specDbToY (thresholdAt (rel, sel, hx));
                 g.setColour (juce::Colours::white);
                 g.fillEllipse (hx - 6.5f, y - 6.5f, 13.0f, 13.0f);
                 g.setColour (c);
                 g.drawEllipse (hx - 6.5f, y - 6.5f, 13.0f, 13.0f, 2.0f);
-                drawPill (g, { roomRight ? x1 + 8.0f : x0 - 8.0f, y }, juce::String::fromUTF8 ("seuil ") + juce::String (juce::roundToInt (rel.threshold)) + " dB",
-                          c, roomRight ? 1 : -1);
+                const auto label = rel.autoThreshold
+                    ? juce::String::fromUTF8 ("seuil auto ") + (rel.autoOffset >= 0.0f ? "+" : "") + juce::String (rel.autoOffset, 1) + " dB"
+                    : juce::String::fromUTF8 ("seuil ") + juce::String (juce::roundToInt (rel.threshold)) + " dB";
+                drawPill (g, { roomRight ? x1 + 8.0f : x0 - 8.0f, specDbToY (thresholdAt (rel, sel, roomRight ? x1 : x0)) }, label, c, roomRight ? 1 : -1);
             }
 
             // Courbe de réduction max (façonnable par points)
@@ -388,31 +430,37 @@ namespace breath::ui
             drawCaption (g, juce::String::fromUTF8 ("creusée par"), { x, cy - 10.0f, 90.0f, 20.0f });
             x += 84.0f;
 
+            // Pastilles de couleur (une par piste source, + Self) : clic = choisir la relation réglée.
             for (int u : sources)
             {
-                const auto nm = hub.displayName (u);
-                const auto c = hub.displayColour (u);
-                const float w = textWidth (font (12.0f), nm) + 34.0f;
+                const auto rel = hub.getRelation (u, me);
+                const bool isSelf = u == me;
+                const auto nm = isSelf ? juce::String ("Self") : hub.displayName (u);
+                const auto c = isSelf ? juce::Colour (0xffe8e8ec) : hub.displayColour (u);
+                const float w = textWidth (font (12.0f, Weight::medium), nm) + 34.0f;
                 if (x + w > (float) getWidth() - 190.0f) break;
                 const auto r = juce::Rectangle<float> (x, cy - 13.0f, w, 26.0f);
+                const bool on = rel.enabled;
 
                 if (u == sel)
                 {
-                    g.setColour (c.withAlpha (0.12f));
-                    g.fillRoundedRectangle (r, 7.0f);
-                    g.setColour (c.withAlpha (0.55f));
-                    g.drawRoundedRectangle (r.reduced (0.5f), 7.0f, 1.0f);
+                    g.setColour (on ? c : colours::raised);
+                    g.fillRoundedRectangle (r, 13.0f);
+                    g.setColour (on ? juce::Colour (0xff141416) : colours::text2);
                 }
-                g.setColour (c);
-                g.fillEllipse (r.getX() + 9.0f, cy - 4.0f, 8.0f, 8.0f);
-                g.setColour (u == sel ? colours::text : colours::text2);
-                g.setFont (font (12.0f));
-                g.drawText (nm, r.withTrimmedLeft (23.0f), juce::Justification::centredLeft);
+                else
+                {
+                    g.setColour ((on ? c : colours::text3).withAlpha (on ? 0.7f : 0.5f));
+                    g.drawRoundedRectangle (r.reduced (0.75f), 13.0f, 1.5f);
+                    g.setColour (on ? c.withAlpha (0.85f) : colours::text3);
+                }
+                g.fillEllipse (r.getX() + 10.0f, cy - 3.5f, 7.0f, 7.0f);
+                g.setFont (font (12.0f, Weight::medium));
+                g.drawText (on ? nm : nm + " (off)", r.withTrimmedLeft (23.0f), juce::Justification::centredLeft);
                 chipAreas.push_back ({ r, u });
                 x += w + 6.0f;
             }
 
-            if (hub.numActive() > 1)
             {
                 addChipArea = { x, cy - 13.0f, 26.0f, 26.0f };
                 g.setColour (hover.t == Target::addChip ? colours::raised : colours::panel2);
@@ -427,9 +475,9 @@ namespace breath::ui
             {
                 g.setColour (colours::text3);
                 g.setFont (font (11.0f));
-                g.drawText (hub.numActive() <= 1
+                g.drawText (hub.numActive (proc.getFamily()) <= 1
                                 ? juce::String::fromUTF8 ("Ajoutez Breath sur d'autres pistes pour créer des relations")
-                                : juce::String::fromUTF8 ("Aucune piste ne creuse celle-ci : « + » pour en ajouter une"),
+                                : juce::String::fromUTF8 ("Aucune piste ne creuse celle-ci : « + » pour en ajouter une (ou Self)"),
                             juce::Rectangle<float> (x, cy - 10.0f, 360.0f, 20.0f), juce::Justification::centredLeft);
             }
         }
@@ -469,7 +517,7 @@ namespace breath::ui
             const float x0 = freqToX (rel.lowHz), x1 = freqToX (rel.highHz);
             const bool inX = p.x >= x0 - 4.0f && p.x <= x1 + 4.0f;
 
-            if (inX && std::abs (p.y - specDbToY (rel.threshold)) < 7.0f) return { Target::threshold, sel, -1 };
+            if (inX && std::abs (p.y - specDbToY (thresholdAt (rel, sel, p.x))) < 7.0f) return { Target::threshold, sel, -1 };
             if (inX && std::abs (p.y - redDbToY (rel.maxAt (xToFreq (p.x)))) < 7.0f) return { Target::maxLine, sel, -1 };
             if (p.y >= a.getY() - 8.0f && p.y <= a.getBottom())
             {
@@ -477,15 +525,6 @@ namespace breath::ui
                 if (std::abs (p.x - x1) < 7.0f) return { Target::highEdge, sel, -1 };
             }
         }
-
-        if (a.contains (p))
-            for (int u : sources)
-            {
-                if (u == sel) continue;
-                const auto rel = hub.getRelation (u, me);
-                if (p.x >= freqToX (rel.lowHz) && p.x <= freqToX (rel.highHz))
-                    return { Target::selectOther, u, -1 };
-            }
 
         return {};
     }
@@ -520,17 +559,20 @@ namespace breath::ui
     {
         juce::PopupMenu m;
         m.addSectionHeader (juce::String::fromUTF8 ("Faire creuser cette piste par…"));
-        for (int s : hub.hierarchy())
-            if (s != me && ! hub.isRelationActive (s, me))
+        if (! hub.isRelationVisible (me, me))
+            m.addItem (1000, juce::String::fromUTF8 ("Self (la piste se creuse elle-même : compresseur / anti-résonances)"));
+        for (int s : hub.hierarchy (proc.getFamily()))
+            if (s != me && ! hub.isRelationVisible (s, me))
                 m.addItem (s + 1, hub.displayName (s));
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (addChipArea.toNearestInt())),
                          [this] (int r)
                          {
-                             const int s = r - 1;
-                             if (s < 0 || ! hub.isActive (s)) return;
+                             const int s = r == 1000 ? me : r - 1;
+                             if (r <= 0 || ! hub.isActive (s)) return;
                              auto rel = hub.getRelation (s, me);
+                             rel.assigned = true;
                              rel.enabled = true;
-                             rel.followOrder = hub.isAbove (s, me);
+                             rel.followOrder = s != me && hub.isAbove (s, me);
                              hub.beginEdit();
                              hub.setRelation (s, me, rel);
                              hub.endEdit();
@@ -540,12 +582,21 @@ namespace breath::ui
 
     void SpectrumView::showSourceMenu (int source)
     {
+        const auto rel = hub.getRelation (source, me);
+        const auto nm = source == me ? juce::String ("Self") : hub.displayName (source);
         juce::PopupMenu m;
-        m.addItem (1, juce::String::fromUTF8 ("Désactiver la relation ") + hub.displayName (source) + juce::String::fromUTF8 (" → ") + hub.displayName (me));
+        m.addItem (1, rel.enabled ? juce::String::fromUTF8 ("Bypass de la relation ") + nm : juce::String::fromUTF8 ("Réactiver la relation ") + nm);
+        m.addItem (2, juce::String::fromUTF8 ("Retirer la relation ") + nm);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [this, source] (int r)
         {
-            if (r == 1 && hub.isRelationActive (source, me))
-                hub.toggleRelation (source, me);
+            if (! hub.isActive (source)) return;
+            auto s = hub.getRelation (source, me);
+            if (r == 1) s.enabled = ! s.enabled;
+            else if (r == 2) s.assigned = false;
+            else return;
+            hub.beginEdit();
+            hub.setRelation (source, me, s);
+            hub.endEdit();
         });
     }
 
@@ -555,7 +606,7 @@ namespace breath::ui
 
         if (drag.t == Target::addChip) { drag = {}; showAddMenu(); return; }
 
-        if (drag.t == Target::chip || drag.t == Target::selectOther)
+        if (drag.t == Target::chip)
         {
             const int s = drag.slot;
             drag = {};
@@ -625,8 +676,11 @@ namespace breath::ui
                 }
                 break;
             }
-            case Target::maxLine:   s.maxReduction = juce::jlimit (0.5f, 24.0f, dragStart.maxReduction + yToRedDb (p.y) - yToRedDb (dragOrigin.y)); break;
-            case Target::threshold: s.threshold = juce::jlimit (-80.0f, 0.0f, yToSpecDb (p.y)); break;
+            case Target::maxLine:   s.maxReduction = juce::jlimit (0.5f, s.maxLimit(), dragStart.maxReduction + yToRedDb (p.y) - yToRedDb (dragOrigin.y)); break;
+            case Target::threshold:
+                if (s.autoThreshold) s.autoOffset = juce::jlimit (-24.0f, 24.0f, dragStart.autoOffset + yToSpecDb (p.y) - yToSpecDb (dragOrigin.y));
+                else                 s.threshold = juce::jlimit (-80.0f, 0.0f, yToSpecDb (p.y));
+                break;
             case Target::node:
             {
                 auto& n = s.nodes[(size_t) drag.node];
@@ -688,7 +742,7 @@ namespace breath::ui
         }
         else if (h.t == Target::lowEdge)   { s.lowHz = defaults.lowHz;   s.lowSlope = defaults.lowSlope; }
         else if (h.t == Target::highEdge)  { s.highHz = defaults.highHz; s.highSlope = defaults.highSlope; }
-        else if (h.t == Target::threshold) s.threshold = defaults.threshold;
+        else if (h.t == Target::threshold) { s.threshold = defaults.threshold; s.autoOffset = defaults.autoOffset; }
         else if (h.t == Target::none && graphArea().contains (e.position)
                  && e.position.x >= freqToX (s.lowHz) && e.position.x <= freqToX (s.highHz)
                  && e.position.y < redDbToY (24.0f) && s.numNodes < kMaxNodes)

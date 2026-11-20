@@ -17,6 +17,7 @@ namespace breath
     constexpr float kMaxFreq      = 20000.0f;
     constexpr float kSilenceDb    = -120.0f;
     constexpr int kDefaultSyncDelay = 512;  // délai de synchro par défaut (échantillons)
+    constexpr int kNumFamilies    = 5;      // Alpha, Bêta, Gamma, Sigma, Oméga
 
     static_assert (kHop % kTick == 0, "le pas d'analyse doit être un multiple du pas de contrôle");
 
@@ -74,8 +75,15 @@ namespace breath
     // Réglages d'une relation « piste source → piste creusée ».
     struct RelationSettings
     {
-        bool  enabled     = true;
+        bool  assigned    = true;    // la relation existe (pastille affichée) ; sinon elle est retirée
+        bool  enabled     = true;    // false = relation en bypass (elle reste affichée, grisée)
         bool  followOrder = true;    // active seulement si la source est au-dessus dans la hiérarchie
+        bool  hard        = false;   // mode Hard : réduction franche, jusqu'à 70 dB
+        bool  masking     = false;   // ne creuser que là où les deux pistes ont vraiment de l'énergie
+        bool  autoThreshold = false; // seuil relatif au spectre moyen de la source
+        float autoOffset  = 3.0f;    // seuil auto : dB au-dessus du spectre moyen
+        float detailLow   = 0.0f;    // -1..1 : résolution plus grossière / plus fine dans le bas du spectre
+        float detailHigh  = 0.0f;    // -1..1 : idem dans le haut du spectre
         float amount      = 0.5f;    // 0..1 (dB de réduction par dB au-dessus du seuil)
         float maxReduction = 6.0f;   // dB (positif)
         float threshold   = -30.0f;  // dBFS
@@ -91,8 +99,13 @@ namespace breath
 
         bool operator== (const RelationSettings&) const = default;
 
-        // Relation active compte tenu de la position des deux pistes dans la hiérarchie.
-        bool isActive (bool sourceIsAbove) const noexcept { return enabled && (! followOrder || sourceIsAbove); }
+        // Relation affichée (assignée et pas « en veille » à cause de la hiérarchie).
+        bool isVisible (bool sourceIsAbove) const noexcept { return assigned && (! followOrder || sourceIsAbove); }
+        // Relation qui travaille réellement (affichée et pas en bypass).
+        bool isActive (bool sourceIsAbove) const noexcept { return isVisible (sourceIsAbove) && enabled; }
+
+        static constexpr float kMaxSoft = 24.0f, kMaxHard = 70.0f;
+        float maxLimit() const noexcept { return hard ? kMaxHard : kMaxSoft; }
 
         // Pondération de la zone traitée à la fréquence f (0..1), bords en fondu selon la pente.
         float rangeWeight (float f) const noexcept
@@ -122,14 +135,15 @@ namespace breath
             float v = maxReduction;
             for (int i = 0; i < numNodes; ++i)
                 v += nodeShape (nodes[(size_t) i], f);
-            return juce::jlimit (0.0f, 30.0f, v);
+            return juce::jlimit (0.0f, maxLimit() + 6.0f, v);
         }
     };
 
     // Version « atomique » lue par le thread audio (écrite par le thread de l'interface).
     struct AtomicRelation
     {
-        std::atomic<bool>  enabled { true }, followOrder { true };
+        std::atomic<bool>  assigned { true }, enabled { true }, followOrder { true }, hard { false }, masking { false }, autoThreshold { false };
+        std::atomic<float> autoOffset { 3.0f }, detailLow { 0.0f }, detailHigh { 0.0f };
         std::atomic<float> amount { 0.5f }, maxReduction { 6.0f }, threshold { -30.0f },
                            attackMs { 5.0f }, releaseMs { 120.0f },
                            lowHz { 20.0f }, highHz { 20000.0f }, lowSlope { 0.3f }, highSlope { 0.3f }, resolution { 0.6f };
@@ -159,6 +173,13 @@ namespace breath
                                              std::memory_order_relaxed);
             }
             followOrder.store (s.followOrder, std::memory_order_relaxed);
+            hard.store (s.hard, std::memory_order_relaxed);
+            masking.store (s.masking, std::memory_order_relaxed);
+            autoThreshold.store (s.autoThreshold, std::memory_order_relaxed);
+            autoOffset.store (s.autoOffset, std::memory_order_relaxed);
+            detailLow.store (s.detailLow, std::memory_order_relaxed);
+            detailHigh.store (s.detailHigh, std::memory_order_relaxed);
+            assigned.store (s.assigned, std::memory_order_relaxed);
             enabled.store (s.enabled, std::memory_order_release);
         }
 
@@ -167,6 +188,13 @@ namespace breath
             RelationSettings s;
             s.enabled      = enabled.load (std::memory_order_acquire);
             s.followOrder  = followOrder.load (std::memory_order_relaxed);
+            s.assigned     = assigned.load (std::memory_order_relaxed);
+            s.hard         = hard.load (std::memory_order_relaxed);
+            s.masking      = masking.load (std::memory_order_relaxed);
+            s.autoThreshold = autoThreshold.load (std::memory_order_relaxed);
+            s.autoOffset   = autoOffset.load (std::memory_order_relaxed);
+            s.detailLow    = detailLow.load (std::memory_order_relaxed);
+            s.detailHigh   = detailHigh.load (std::memory_order_relaxed);
             s.amount       = amount.load (std::memory_order_relaxed);
             s.maxReduction = maxReduction.load (std::memory_order_relaxed);
             s.threshold    = threshold.load (std::memory_order_relaxed);

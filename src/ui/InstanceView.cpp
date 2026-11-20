@@ -34,6 +34,7 @@ namespace breath::ui
           makeupAtt (p.getParams(), "makeup", makeup),
           lookAtt (p.getParams(), "lookahead", lookahead),
           autoMakeup (p.getParams(), "autoMakeup", "Auto"),
+          autoLook (p.getParams(), "autoLookahead", ""),
           stereo (*p.getParams().getParameter ("stereoMode"), { juce::String::fromUTF8 ("Stéréo"), "Mid", "Side" }),
           bands (*p.getParams().getParameter ("bands"), { "64 bandes", "128 bandes" }),
           delta (p.getParams(), "delta", juce::String::fromUTF8 ("Delta")),
@@ -64,6 +65,9 @@ namespace breath::ui
                                                   "un peu plus de processeur."));
         addAndMakeVisible (bands);
         addAndMakeVisible (autoMakeup);
+        autoLook.setTooltip (juce::String::fromUTF8 ("Lookahead auto : se cale sur le délai de synchro entre instances "
+                                                     "(réaction sans retard, avec la plus petite latence possible)."));
+        addAndMakeVisible (autoLook);
         addAndMakeVisible (stereo);
         addAndMakeVisible (delta);
         addAndMakeVisible (bypass);
@@ -72,6 +76,14 @@ namespace breath::ui
     void InstanceView::tick()
     {
         spectrum.tick();
+        const bool byp = proc.isDisplayBypassed();
+        if (byp != lastBypassed)
+        {
+            lastBypassed = byp;
+            repaint();
+        }
+        const bool al = proc.getParams().getRawParameterValue ("autoLookahead")->load() > 0.5f;
+        lookahead.setEnabled (! al);
         const int sync = proc.getHub().getSyncDelay();
         const float a = proc.getAutoMakeupDb();
         if (sync != lastSync || std::abs (a - lastAuto) > 0.05f)
@@ -108,6 +120,7 @@ namespace breath::ui
         makeup.setBounds (inner (cards[1]).removeFromBottom (18.0f).toNearestInt().expanded (6, 0));
         autoMakeup.setBounds (inner (cards[1]).removeFromTop (16.0f).removeFromRight (78.0f).toNearestInt().expanded (0, 4));
         lookahead.setBounds (inner (cards[2]).removeFromBottom (18.0f).toNearestInt().expanded (6, 0));
+        autoLook.setBounds (inner (cards[2]).removeFromTop (16.0f).removeFromRight (36.0f).toNearestInt().expanded (0, 4));
         auto sc = inner (cards[3]).withTrimmedTop (18.0f);
         stereo.setBounds (sc.removeFromTop (26.0f).toNearestInt());
         sc.removeFromTop (6.0f);
@@ -157,20 +170,37 @@ namespace breath::ui
         if (proc.getParams().getRawParameterValue ("autoMakeup")->load() > 0.5f)
             hintText (cards[1], juce::String::fromUTF8 ("Auto : +") + juce::String (proc.getAutoMakeupDb(), 1) + " dB", colours::accent);
 
-        const double la = lookahead.getValue();
-        if (la <= 0.0) value (cards[2], "Off", "");
-        else           value (cards[2], juce::String (la, 1), "ms");
-
         // Indication : délai de synchronisation entre instances.
         const double sr = juce::jmax (1.0, proc.getSampleRateSafe());
         const double syncMs = proc.getHub().getSyncDelay() * 1000.0 / sr;
+        const bool autoLa = proc.getParams().getRawParameterValue ("autoLookahead")->load() > 0.5f;
+        const double la = autoLa ? proc.getLatencyInSamples() * 1000.0 / sr : lookahead.getValue();
+        if (la <= 0.0) value (cards[2], "Off", "");
+        else           value (cards[2], juce::String (la, 1), "ms");
         const bool ok = la + 0.05 >= syncMs;
-        hintText (cards[2], ok ? juce::String::fromUTF8 ("Réaction sans retard") : "Synchro " + juce::String (syncMs, 1) + " ms",
+        hintText (cards[2], autoLa ? juce::String::fromUTF8 ("Auto · réaction sans retard")
+                                   : (ok ? juce::String::fromUTF8 ("Réaction sans retard") : "Synchro " + juce::String (syncMs, 1) + " ms"),
                   ok ? colours::accent : colours::text3);
     }
 
     void InstanceView::paintOverChildren (juce::Graphics& g)
     {
+        // Bypass (instance ou Bypass all) : tout est grisé pour qu'on le voie tout de suite.
+        if (proc.isDisplayBypassed())
+        {
+            auto area = spectrum.getBounds().toFloat().getUnion (panelCard);
+            g.setColour (colours::bg.withAlpha (0.62f));
+            g.fillRoundedRectangle (area, 12.0f);
+            const bool all = proc.getHub().getGlobalBypassAll (proc.getFamily());
+            const auto t = all ? juce::String ("BYPASS ALL") : juce::String ("BYPASS");
+            auto pill = juce::Rectangle<float> (textWidth (font (13.0f, Weight::semibold), t) + 32.0f, 30.0f).withCentre (area.getCentre());
+            g.setColour (colours::panel2);
+            g.fillRoundedRectangle (pill, 15.0f);
+            g.setColour (colours::text);
+            g.setFont (font (13.0f, Weight::semibold));
+            g.drawText (t, pill, juce::Justification::centred);
+        }
+
         auto area = spectrum.getBounds().toFloat().reduced (18.0f, 0.0f).withTrimmedBottom (56.0f);
         drawWarnings (g, area, proc);
     }

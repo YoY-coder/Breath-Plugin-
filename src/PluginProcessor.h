@@ -51,9 +51,14 @@ public:
     void  setBypassAllFromHub (bool b) override;
     int   getFilterBands() const override { return filterBandsWanted(); }
     int   filterBandsWanted() const noexcept;
+    int   getFamily() const noexcept;
+    juce::AudioProcessorParameter* getBypassParameter() const override;
+    bool  isDisplayBypassed() const noexcept { return displayBypassed; }
     void  prepareBandTables();
     std::array<float, 64> bandOct64 {};
     std::array<float, 128> bandOct128 {};
+    std::array<float, 64> bandDetail64 {};
+    std::array<float, 128> bandDetail128 {};
 
     // --- Accès pour l'interface ----------------------------------------------
     breath::BreathHub& getHub() noexcept          { return *hub; }
@@ -98,6 +103,8 @@ private:
     std::atomic<float>* pMakeup = nullptr;
     std::atomic<float>* pAutoMakeup = nullptr;
     std::atomic<float>* pBands = nullptr;
+    std::atomic<float>* pFamily = nullptr;
+    std::atomic<float>* pAutoLook = nullptr;
 
     // Identité
     int slotIndex = -1;
@@ -126,7 +133,9 @@ private:
     // Relations (une par instance possible au-dessus)
     std::array<std::array<float, breath::kNumBands>, breath::kMaxInstances> env {};
     std::array<float, breath::kMaxInstances> weight {}, lastTarget {};
-    std::array<bool, breath::kMaxInstances> weightInit {};
+    std::array<bool, breath::kMaxInstances> weightInit {}, refInit {};
+    std::array<std::array<float, breath::kNumBands>, breath::kMaxInstances> refLevel {};   // seuil auto
+    bool displayBypassed = false;
     std::array<int, breath::kMaxInstances> stallCount {};
     bool stalledThisBlock = false;
 

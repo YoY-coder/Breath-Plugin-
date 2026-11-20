@@ -33,6 +33,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout BreathAudioProcessor::create
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "makeup", 1 }, "Make-up",
                     NormalisableRange<float> (-12.0f, 24.0f, 0.1f), 0.0f, AudioParameterFloatAttributes().withLabel ("dB")));
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { "autoMakeup", 1 }, "Make-up auto", false));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "family", 1 }, "Famille",
+                    StringArray { "Alpha", String::fromUTF8 ("Bêta"), "Gamma", "Sigma", String::fromUTF8 ("Oméga") }, 0,
+                    AudioParameterChoiceAttributes().withAutomatable (false)));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { "autoLookahead", 1 }, "Lookahead auto", false,
+                    AudioParameterBoolAttributes().withAutomatable (false)));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "bands", 1 }, String::fromUTF8 ("Résolution max"),
                     StringArray { "64 bandes", "128 bandes" }, 0, AudioParameterChoiceAttributes().withAutomatable (false)));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "stereoMode", 1 }, String::fromUTF8 ("Mode stéréo"),
@@ -56,6 +61,8 @@ BreathAudioProcessor::BreathAudioProcessor()
     pStereo    = apvts.getRawParameterValue ("stereoMode");
     pMakeup    = apvts.getRawParameterValue ("makeup");
     pBands     = apvts.getRawParameterValue ("bands");
+    pFamily    = apvts.getRawParameterValue ("family");
+    pAutoLook  = apvts.getRawParameterValue ("autoLookahead");
     pAutoMakeup = apvts.getRawParameterValue ("autoMakeup");
 
     instanceId = juce::Uuid();
@@ -79,8 +86,21 @@ BreathAudioProcessor::~BreathAudioProcessor()
 
 void BreathAudioProcessor::prepareBandTables()
 {
-    for (int j = 0; j < 64; ++j)  bandOct64[(size_t) j]  = std::log2 (bandCentreN (j, 64));
-    for (int j = 0; j < 128; ++j) bandOct128[(size_t) j] = std::log2 (bandCentreN (j, 128));
+    // Détail low / high : fondu entre 250 Hz (bas) et 4 kHz (haut).
+    auto det = [] (float f) { return juce::jlimit (0.0f, 1.0f, std::log2 (f / 250.0f) / 4.0f); };
+    for (int j = 0; j < 64; ++j)  { bandOct64[(size_t) j]  = std::log2 (bandCentreN (j, 64));  bandDetail64[(size_t) j]  = det (bandCentreN (j, 64)); }
+    for (int j = 0; j < 128; ++j) { bandOct128[(size_t) j] = std::log2 (bandCentreN (j, 128)); bandDetail128[(size_t) j] = det (bandCentreN (j, 128)); }
+}
+
+juce::AudioProcessorParameter* BreathAudioProcessor::getBypassParameter() const
+{
+    // Le bouton d'activation du DAW pilote directement notre Bypass.
+    return apvts.getParameter ("bypass");
+}
+
+int BreathAudioProcessor::getFamily() const noexcept
+{
+    return pFamily != nullptr ? juce::jlimit (0, kNumFamilies - 1, juce::roundToInt (pFamily->load())) : 0;
 }
 
 int BreathAudioProcessor::filterBandsWanted() const noexcept
@@ -109,12 +129,15 @@ void BreathAudioProcessor::setBypassAllFromHub (bool b)     { setParam (apvts.ge
 
 void BreathAudioProcessor::timerCallback()
 {
+    if (slotIndex >= 0 && hub->familyOf (slotIndex) != getFamily())
+        hub->setFamily (slotIndex, getFamily());
+
     // Nouvelle instance (pas d'état chargé) : elle se place en bas de la hiérarchie.
     if (! rankAssigned && ! stateLoaded && slotIndex >= 0 && juce::Time::getMillisecondCounter() - createTime > 300)
     {
         rankAssigned = true;
         int maxRank = 0;
-        for (int s : hub->hierarchy())
+        for (int s : hub->hierarchy (getFamily()))
             if (s != slotIndex && hub->info (s).client != nullptr)
                 maxRank = juce::jmax (maxRank, hub->info (s).client->getRank());
         setRankFromHub (juce::jmin (kMaxInstances, maxRank + 1));
@@ -124,7 +147,7 @@ void BreathAudioProcessor::timerCallback()
 
 bool BreathAudioProcessor::isIsolated() const
 {
-    return slotIndex >= 0 && savedPeers > 0 && hub->numActive() == 1
+    return slotIndex >= 0 && savedPeers > 0 && hub->numActive (getFamily()) == 1
         && juce::Time::getMillisecondCounter() - loadTime > 4000;
 }
 
@@ -141,7 +164,7 @@ void BreathAudioProcessor::prepareToPlay (double sampleRate, int)
     analyzer.prepare (sampleRate);
     bank.prepare (sampleRate, filterBandsWanted());
 
-    const int maxDelay = (int) std::ceil (kMaxLookaheadMs * 0.001 * sampleRate) + 2;
+    const int maxDelay = (int) std::ceil (0.05 * sampleRate) + 2;   // 50 ms (lookahead auto compris)
     int size = 1;
     while (size < maxDelay) size <<= 1;
     for (auto& d : delayBuf)
@@ -179,6 +202,7 @@ void BreathAudioProcessor::resetDsp()
     weight.fill (0.0f);
     lastTarget.fill (0.0f);
     weightInit.fill (false);
+    refInit.fill (false);
     stallCount.fill (0);
     for (auto& d : delayBuf) std::fill (d.begin(), d.end(), 0.0f);
     delayWrite = 0;
@@ -313,19 +337,22 @@ bool BreathAudioProcessor::fetchFrame (int u, int64_t r, bool offline, FrameData
 void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
 {
     auto& me = hub->slot (slotIndex);
+    const int myFamily = me.family.load (std::memory_order_relaxed);
     const int64_t r = s - syncDelay;
 
-    // 1. Trames de toutes les instances au même instant de la timeline.
+    // 1. Trames des instances de la même famille, au même instant de la timeline.
     std::array<FrameData, kMaxInstances> fr;
     std::array<bool, kMaxInstances> got {};
 
     for (int u = 0; u < kMaxInstances; ++u)
     {
-        if (! hub->slot (u).active.load (std::memory_order_relaxed))
+        const auto& su = hub->slot (u);
+        if (! su.active.load (std::memory_order_relaxed) || su.family.load (std::memory_order_relaxed) != myFamily)
             continue;
         if (u == slotIndex && ! timelineMode)
         {
             got[(size_t) u] = true;
+            std::copy (ownBands.begin(), ownBands.end(), fr[(size_t) u].bands);
             fr[(size_t) u].rank = blockRank;
             fr[(size_t) u].macro = blockMacro;
             fr[(size_t) u].bypassAll = blockBypassAll;
@@ -335,8 +362,8 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
                                        : readLive (u, fr[(size_t) u]);
     }
 
-    // 2. Valeurs globales (portées par l'instance maîtresse).
-    const int m = hub->getMasterSlot();
+    // 2. Valeurs globales de la famille (portées par son instance maîtresse).
+    const int m = hub->getMasterSlot (myFamily);
     float macro = 1.0f;
     bypassAllTarget = 0.0f;
     if (m >= 0 && got[(size_t) m])
@@ -351,20 +378,40 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
     // 3. Réduction voulue par chaque relation, combinée par MAXIMUM par bande.
     const int nb = bank.getNumBands();          // 64 ou 128
     const int stride = kNumBands / nb;
-    std::array<float, kNumBands> total {}, curveMax {}, curveInt {};
+    const float* octs = (nb == 128) ? bandOct128.data() : bandOct64.data();
+    const float* detT = (nb == 128) ? bandDetail128.data() : bandDetail64.data();
+    std::array<float, kNumBands> total {};
     const float tickSec = (float) kTick / (float) sr;
     const float wCoef = 1.0f - std::exp (-tickSec / kWeightTimeSec);
 
+    // Niveaux de la piste elle-même sur la grille : à l'instant r (masking, déterministe)
+    // et « maintenant » (Self, sans délai).
+    std::array<float, kNumBands> tgtGrid {}, ownGrid {};
+    for (int j = 0; j < nb; ++j)
+    {
+        float a = kSilenceDb, b = kSilenceDb;
+        for (int k = 0; k < stride; ++k)
+        {
+            if (got[(size_t) slotIndex]) a = juce::jmax (a, fr[(size_t) slotIndex].bands[j * stride + k]);
+            b = juce::jmax (b, ownBands[(size_t) (j * stride + k)]);
+        }
+        tgtGrid[(size_t) j] = a;
+        ownGrid[(size_t) j] = b;
+    }
+
+    auto smooth01 = [] (float t) { t = juce::jlimit (0.0f, 1.0f, t); return t * t * (3.0f - 2.0f * t); };
+
     for (int u = 0; u < kMaxInstances; ++u)
     {
-        if (u == slotIndex)
-            continue;
+        const bool isSelf = u == slotIndex;
+        const auto& su = hub->slot (u);
 
-        if (! hub->slot (u).active.load (std::memory_order_relaxed))
+        if (! su.active.load (std::memory_order_relaxed) || su.family.load (std::memory_order_relaxed) != myFamily)
         {
             env[(size_t) u].fill (0.0f);
             weight[(size_t) u] = 0.0f;
             weightInit[(size_t) u] = false;
+            refInit[(size_t) u] = false;
             me.activityFrom[(size_t) u].store (0.0f, std::memory_order_relaxed);
             continue;
         }
@@ -372,21 +419,22 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
         const auto& relA = hub->relation (u, slotIndex);
         const auto rel = relA.load();
         float target = lastTarget[(size_t) u];
+        const bool srcValid = isSelf || got[(size_t) u];
 
-        if (got[(size_t) u])
+        if (isSelf)
+        {
+            target = (rel.assigned && rel.enabled) ? 1.0f : 0.0f;
+            if (! weightInit[(size_t) u]) { weight[(size_t) u] = target; weightInit[(size_t) u] = true; }
+        }
+        else if (got[(size_t) u])
         {
             const float ru = fr[(size_t) u].rank;
-            const int seqU = hub->slot (u).creationSeq.load (std::memory_order_relaxed);
+            const int seqU = su.creationSeq.load (std::memory_order_relaxed);
             const bool above = (std::abs (ru - myRank) > 0.5f) ? ru < myRank : seqU < mySeq;
             target = rel.isActive (above) ? 1.0f : 0.0f;
-            lastTarget[(size_t) u] = target;
-
-            if (! weightInit[(size_t) u])
-            {
-                weight[(size_t) u] = target;
-                weightInit[(size_t) u] = true;
-            }
+            if (! weightInit[(size_t) u]) { weight[(size_t) u] = target; weightInit[(size_t) u] = true; }
         }
+        lastTarget[(size_t) u] = target;
 
         auto& w = weight[(size_t) u];
         w += (target - w) * wCoef;
@@ -396,76 +444,118 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
         {
             w = 0.0f;
             e.fill (0.0f);
+            refInit[(size_t) u] = false;
             me.activityFrom[(size_t) u].store (0.0f, std::memory_order_relaxed);
             continue;
         }
 
-        // Réduction instantanée par bande, sur la grille de filtrage (64 ou 128 bandes).
-        // Plage de fréquences avec bords en fondu selon la pente réglée.
+        // Niveaux de la source sur la grille de filtrage (crête des bandes fines).
+        std::array<float, kNumBands> src {};
+        for (int j = 0; j < nb; ++j)
+        {
+            if (isSelf) { src[(size_t) j] = ownGrid[(size_t) j]; continue; }
+            float lvl = kSilenceDb;
+            if (srcValid)
+                for (int k = 0; k < stride; ++k)
+                    lvl = juce::jmax (lvl, fr[(size_t) u].bands[j * stride + k]);
+            src[(size_t) j] = lvl;
+        }
+
+        // Seuil : fixe, ou automatique (spectre de la source lissé en fréquence et dans le temps).
+        std::array<float, kNumBands> thr {};
+        if (rel.autoThreshold)
+        {
+            std::array<float, kNumBands> sm = src;
+            const float p = std::exp (-1.0f / (6.0f * (float) nb / 64.0f));    // ≈ 1 octave
+            for (int j = 1; j < nb; ++j)      sm[(size_t) j] += p * (sm[(size_t) j - 1] - sm[(size_t) j]);
+            for (int j = nb - 2; j >= 0; --j) sm[(size_t) j] += p * (sm[(size_t) j + 1] - sm[(size_t) j]);
+            auto& ref = refLevel[(size_t) u];
+            const float c = isSelf ? 1.0f - std::exp (-tickSec / 0.03f) : 1.0f - std::exp (-tickSec / 0.25f);
+            for (int j = 0; j < nb; ++j)
+            {
+                if (! refInit[(size_t) u]) ref[(size_t) j] = sm[(size_t) j];
+                else                       ref[(size_t) j] += (sm[(size_t) j] - ref[(size_t) j]) * c;
+                thr[(size_t) j] = juce::jmax (-80.0f, ref[(size_t) j] + rel.autoOffset);
+            }
+            refInit[(size_t) u] = true;
+        }
+        else
+        {
+            for (int j = 0; j < nb; ++j) thr[(size_t) j] = rel.threshold;
+        }
+
+        // Réduction instantanée par bande (plage avec bords en fondu selon la pente).
         std::array<float, kNumBands> inst {}, mask {};
         double rangePower = 0.0, maskSum = 0.0;
-
-        // Bords de la zone en fondu (calcul en octaves, centres de bandes précalculés).
         const float loOct = std::log2 (juce::jmin (rel.lowHz, rel.highHz)), hiOct = std::log2 (juce::jmax (rel.lowHz, rel.highHz));
         const float invLo = 1.0f / juce::jmax (0.02f, rel.lowSlope), invHi = 1.0f / juce::jmax (0.02f, rel.highSlope);
-        const float* octs = (nb == 128) ? bandOct128.data() : bandOct64.data();
-        auto smooth01 = [] (float t) { t = juce::jlimit (0.0f, 1.0f, t); return t * t * (3.0f - 2.0f * t); };
+        const float amount = rel.amount * (rel.hard ? 4.0f : 1.0f);
+        const bool masking = rel.masking && ! isSelf;
+        std::array<float, kNumBands> curveMax {}, curveInt {};
 
         for (int j = 0; j < nb; ++j)
         {
             const float o = octs[j];
-            const float m = smooth01 ((o - loOct) * invLo + 0.5f) * smooth01 ((hiOct - o) * invHi + 0.5f);
-            if (m <= 1.0e-4f)
-            {
-                mask[(size_t) j] = 0.0f;
-                continue;
-            }
-            mask[(size_t) j] = m;
+            const float mk = smooth01 ((o - loOct) * invLo + 0.5f) * smooth01 ((hiOct - o) * invHi + 0.5f);
+            if (mk <= 1.0e-4f) continue;
+            mask[(size_t) j] = mk;
 
-            // Niveau de la source sur cette bande (crête des bandes fines correspondantes).
-            float lvl = kSilenceDb, inten = 0.0f, maxC = 0.0f;
-            if (got[(size_t) u])
-            {
-                lvl = fr[(size_t) u].bands[j * stride];
-                for (int k = 1; k < stride; ++k)
-                    lvl = juce::jmax (lvl, fr[(size_t) u].bands[j * stride + k]);
-            }
+            float inten = 0.0f, maxC = 0.0f;
             for (int k = 0; k < stride; ++k)
             {
                 inten += relA.intensity[(size_t) (j * stride + k)].load (std::memory_order_relaxed);
                 maxC  += relA.maxCurve[(size_t) (j * stride + k)].load (std::memory_order_relaxed);
             }
-            if (stride > 1) { inten *= 0.5f; maxC *= 0.5f; }
+            inten /= (float) stride;
+            maxC /= (float) stride;
             curveMax[(size_t) j] = maxC;
             curveInt[(size_t) j] = inten;
 
-            inst[(size_t) j] = juce::jlimit (0.0f, maxC, (lvl - rel.threshold) * rel.amount * inten) * m;
-            if (rel.resolution < 1.0f && lvl > -100.0f) rangePower += (double) (std::exp (lvl * 0.2302585093f) * m);
-            maskSum += m;
+            const float lvl = srcValid ? src[(size_t) j] : kSilenceDb;
+            float over = lvl - thr[(size_t) j];
+            // Masking : on ne creuse que là où la piste creusée a elle aussi de l'énergie.
+            if (masking) over = juce::jmin (over, tgtGrid[(size_t) j] - thr[(size_t) j]);
+            inst[(size_t) j] = juce::jlimit (0.0f, maxC, over * amount * inten) * mk;
+            if (rel.resolution < 1.0f && lvl > -100.0f) rangePower += (double) (std::exp (lvl * 0.2302585093f) * mk);
+            maskSum += mk;
         }
 
-        // Résolution : de « large bande » (une seule réduction sur toute la plage,
-        // pilotée par l'énergie totale) à « spectral fin » (bande par bande).
+        // Résolution (de « large bande » à « spectral fin »), modulée par Détail low / high.
         const float res = juce::jlimit (0.0f, 1.0f, rel.resolution);
-        const float sigma = 0.5f * (std::pow (2.0f, (1.0f - res) * 6.0f) - 1.0f) * (float) nb / 64.0f;
-        if (sigma > 0.01f)
+        const float sigmaBase = 0.5f * (std::pow (2.0f, (1.0f - res) * 6.0f) - 1.0f) * (float) nb / 64.0f;
         {
-            const float p = std::exp (-1.0f / sigma);
-            std::array<float, kNumBands> a = inst, n = mask;
-            for (int j = 1; j < nb; ++j)       { a[(size_t) j] += p * (a[(size_t) j - 1] - a[(size_t) j]); n[(size_t) j] += p * (n[(size_t) j - 1] - n[(size_t) j]); }
-            for (int j = nb - 2; j >= 0; --j)  { a[(size_t) j] += p * (a[(size_t) j + 1] - a[(size_t) j]); n[(size_t) j] += p * (n[(size_t) j + 1] - n[(size_t) j]); }
+            std::array<float, kNumBands> pj {};
+            bool any = false;
             for (int j = 0; j < nb; ++j)
-                inst[(size_t) j] = n[(size_t) j] > 1.0e-6f ? a[(size_t) j] / n[(size_t) j] * mask[(size_t) j] : 0.0f;
+            {
+                const float d = rel.detailLow + (rel.detailHigh - rel.detailLow) * detT[j];
+                const float sg = (sigmaBase + 0.5f) * std::exp2 (-2.0f * d) - 0.5f;
+                pj[(size_t) j] = sg > 0.01f ? std::exp (-1.0f / sg) : 0.0f;
+                any = any || pj[(size_t) j] > 0.0f;
+            }
+            if (any)
+            {
+                std::array<float, kNumBands> a = inst, n = mask;
+                for (int j = 1; j < nb; ++j)       { const float p = pj[(size_t) j]; a[(size_t) j] += p * (a[(size_t) j - 1] - a[(size_t) j]); n[(size_t) j] += p * (n[(size_t) j - 1] - n[(size_t) j]); }
+                for (int j = nb - 2; j >= 0; --j)  { const float p = pj[(size_t) j]; a[(size_t) j] += p * (a[(size_t) j + 1] - a[(size_t) j]); n[(size_t) j] += p * (n[(size_t) j + 1] - n[(size_t) j]); }
+                for (int j = 0; j < nb; ++j)
+                    inst[(size_t) j] = n[(size_t) j] > 1.0e-6f ? a[(size_t) j] / n[(size_t) j] * mask[(size_t) j] : 0.0f;
+            }
         }
 
         if (res < 1.0f && maskSum > 0.0)
         {
             const float lvlRange = (float) (10.0 * std::log10 (rangePower * (64.0 / nb) + 1.0e-14));
-            const float over = (lvlRange - rel.threshold) * rel.amount;
+            float meanThr = 0.0f;
+            for (int j = 0; j < nb; ++j) meanThr += thr[(size_t) j] * mask[(size_t) j];
+            meanThr /= (float) maskSum;
+            const float over = (lvlRange - meanThr) * amount;
             for (int j = 0; j < nb; ++j)
             {
                 if (mask[(size_t) j] <= 0.0f) continue;
-                const float bb = juce::jlimit (0.0f, curveMax[(size_t) j], over * curveInt[(size_t) j]);
+                float ov = over * curveInt[(size_t) j];
+                if (masking) ov = juce::jmin (ov, (tgtGrid[(size_t) j] - thr[(size_t) j]) * amount * curveInt[(size_t) j]);
+                const float bb = juce::jlimit (0.0f, curveMax[(size_t) j], ov);
                 inst[(size_t) j] = res * inst[(size_t) j] + (1.0f - res) * bb * mask[(size_t) j];
             }
         }
@@ -485,7 +575,7 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             activity = juce::jmax (activity, c);
         }
 
-        me.activityFrom[(size_t) u].store (activity, std::memory_order_relaxed);
+        me.activityFrom[(size_t) u].store (displayBypassed ? 0.0f : activity, std::memory_order_relaxed);
     }
 
     bank.setReductions (total.data());
@@ -504,12 +594,14 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
         avgBefore += (before - avgBefore) * c;
         avgAfter  += (after - avgAfter) * c;
         autoComp = avgBefore > 1.0e-9 ? juce::jlimit (0.0f, 12.0f, (float) (10.0 * std::log10 (avgBefore / juce::jmax (avgAfter, 1.0e-30)))) : 0.0f;
-        const float mk = blockMakeup + (blockAutoMakeup ? autoComp : 0.0f);
-        makeupTarget = juce::Decibels::decibelsToGain (mk);
+        const float mkDb = blockMakeup + (blockAutoMakeup ? autoComp : 0.0f);
+        makeupTarget = juce::Decibels::decibelsToGain (mkDb);
         autoCompShown.store (autoComp, std::memory_order_relaxed);
     }
+
+    // Affichage : rien n'est retiré quand l'instance est en bypass.
     for (int b = 0; b < kNumBands; ++b)
-        me.reductionCurve[(size_t) b].store (total[(size_t) (b / stride)], std::memory_order_relaxed);
+        me.reductionCurve[(size_t) b].store (displayBypassed ? 0.0f : total[(size_t) (b / stride)], std::memory_order_relaxed);
 }
 
 //==============================================================================
@@ -547,11 +639,14 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         for (auto& ev : env) ev.fill (0.0f);
     }
     blockMakeup = pMakeup->load();
+    displayBypassed = pBypass->load() > 0.5f || bypassAllTarget > 0.5f;
     blockAutoMakeup = pAutoMakeup->load() > 0.5f;
     if (! blockAutoMakeup) makeupTarget = juce::Decibels::decibelsToGain (blockMakeup);
 
     // Lookahead (latence déclarée à l'hôte)
-    const int lat = juce::jlimit (0, delayMask - 1, juce::roundToInt (pLookahead->load() * 0.001f * (float) sr));
+    const bool autoLook = pAutoLook->load() > 0.5f;
+    const int lat = juce::jlimit (0, delayMask - 1, autoLook ? syncDelay
+                                                             : juce::roundToInt (pLookahead->load() * 0.001f * (float) sr));
     if (lat != currentLatency.load())
     {
         currentLatency = lat;
@@ -711,6 +806,8 @@ void BreathAudioProcessor::setStateInformation (const void* data, int sizeInByte
 
     stateLoaded = true;
     rankAssigned = true;
+    if (slotIndex >= 0)
+        hub->setFamily (slotIndex, getFamily());
     loadTime = juce::Time::getMillisecondCounter();
 
     if (slotIndex < 0)

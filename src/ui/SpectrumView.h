@@ -38,6 +38,7 @@ namespace breath::ui
         float yToRedDb (float y) const;
 
         Hit hitTest (juce::Point<float> p) const;
+        float thresholdAt (const RelationSettings& rel, int source, float x) const;
         juce::Path curvePath (const float* values, std::function<float (float)> toY) const;
         void drawPill (juce::Graphics&, juce::Point<float> anchor, const juce::String&, juce::Colour, int align) const;
         void showAddMenu();
@@ -58,6 +59,7 @@ namespace breath::ui
         Hit drag, hover;
         RelationSettings dragStart;
         juce::Point<float> dragOrigin;
-        int dragAxis = 0;   // bords : 0 = indécis, 1 = fréquence, 2 = pente
+        int dragAxis = 0;
+        float redScale = 15.0f;   // bords : 0 = indécis, 1 = fréquence, 2 = pente
     };
 }

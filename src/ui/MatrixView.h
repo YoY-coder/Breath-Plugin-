@@ -76,14 +76,17 @@ namespace breath::ui
         int source() const;
         int target() const;
         void apply();
-        float rowHeight() const { return mode == Mode::instance ? 38.0f : 46.0f; }
+        float rowHeight() const { return mode == Mode::instance ? 33.0f : 42.0f; }
 
         BreathAudioProcessor& proc;
         BreathHub& hub;
         Mode mode;
-        juce::ToggleButton enabled, follow;
-        juce::Slider amount, maxRed, threshold, attack, release, range, resolution;
+        juce::ToggleButton enabled;
+        juce::Slider amount, attack, release, resolution, detailLow, detailHigh;
+        Segmented hardMode { { "Soft", "Hard" } };
+        LabelledToggle masking { "Masking" }, autoThr { "Seuil auto" }, follow { juce::String::fromUTF8 ("Suivre la hiérarchie") };
         std::vector<Row> rows;
+        juce::Rectangle<float> knobsArea;
         bool editing = false, updating = false;
     };
 

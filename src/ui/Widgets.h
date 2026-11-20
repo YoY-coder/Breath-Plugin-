@@ -56,9 +56,36 @@ namespace breath::ui
     {
     public:
         std::function<void (int)> onSelect;
+        std::function<void()> onCopy;
         int active = 0;
         void paint (juce::Graphics&) override;
         void mouseDown (const juce::MouseEvent&) override;
+    };
+
+    // Interrupteur avec libellé à gauche (non relié à un paramètre).
+    class LabelledToggle : public juce::Component, public juce::SettableTooltipClient
+    {
+    public:
+        explicit LabelledToggle (const juce::String& l) : label (l)
+        {
+            addAndMakeVisible (button);
+            button.onClick = [this] { if (onChange) onChange (button.getToggleState()); };
+        }
+        std::function<void (bool)> onChange;
+        void setState (bool b) { button.setToggleState (b, juce::dontSendNotification); }
+        bool getState() const  { return button.getToggleState(); }
+        void resized() override { button.setBounds (getLocalBounds().removeFromRight (34)); }
+        void paint (juce::Graphics& g) override
+        {
+            g.setColour (isEnabled() ? colours::text2 : colours::text3);
+            g.setFont (font (12.0f));
+            g.drawText (label, getLocalBounds().withTrimmedRight (38), juce::Justification::centredLeft, true);
+        }
+        void enablementChanged() override { repaint(); }
+
+    private:
+        juce::String label;
+        juce::ToggleButton button;
     };
 
     // Interrupteur avec libellé à gauche, relié à un paramètre booléen.

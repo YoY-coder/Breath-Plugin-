@@ -82,7 +82,12 @@ void BreathAudioProcessorEditor::onFrame()
     if (instanceView.isVisible()) instanceView.tick();
     if (matrixView.isVisible() && (frame % 2) == 0) matrixView.tick();
     if ((frame % 2) == 0) topBar.tick();
-    if ((frame % 30) == 0) { instanceView.repaint(); matrixView.repaint(); }
+    if ((frame % 30) == 0)
+    {
+        instanceView.repaint();
+        matrixView.repaint();
+        if (processor.getFamily() != shownFamily) { shownFamily = processor.getFamily(); repaint(); topBar.refresh(); instanceView.refresh(); matrixView.refresh(); }
+    }
 }
 
 void BreathAudioProcessorEditor::resized()
@@ -95,5 +100,6 @@ void BreathAudioProcessorEditor::resized()
 
 void BreathAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (colours::bg);
+    // Teinte très légère selon la famille de l'instance.
+    g.fillAll (colours::bg.interpolatedWith (breath::BreathHub::familyColour (processor.getFamily()), 0.035f));
 }

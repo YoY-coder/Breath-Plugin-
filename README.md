@@ -44,22 +44,22 @@ Breath apparaît dans *Plug-ins → Breath*. Si vous remplacez une ancienne vers
 
 ### Vue Instance (tout se règle ici)
 - Spectre de la piste (gris), spectres des pistes qui la creusent (à leur couleur), courbe de réduction (bleu).
-- **Pastilles en haut** : les pistes qui creusent celle-ci. Clic = régler cette relation ;
-  clic droit = la désactiver ; **« + »** = faire creuser cette piste par une autre.
+- **Pastilles de couleur** en haut : une par piste qui creuse celle-ci (+ **Self**). Clic = régler cette relation ;
+  clic droit = bypass / retirer ; **« + »** = ajouter une piste ou **Self** (la piste se creuse elle-même).
 - **Directement sur le graphique** (relation sélectionnée) :
-  - bords de la zone colorée : glisser **↔ = fréquence**, glisser **↕ = pente** (vers le haut = plus raide,
-    vers le bas = plus douce), comme sur un séparateur de bandes ; la pente s'affiche en dB/oct au survol ;
-  - ligne pointillée de couleur = seuil (la source ne déclenche que là où sa courbe dépasse cette ligne) ;
-  - **courbe bleue = réduction max**, façonnable comme un EQ :
-    **double-clic sur la courbe** = ajouter un point (jusqu'à 8), glisser le point = fréquence / profondeur,
-    **molette** = largeur, double-clic ou clic droit sur un point = supprimer.
-    Un point vers le bas creuse plus à cet endroit, vers le haut protège cette zone ;
+  - bords de la zone : glisser **↔ = fréquence**, **↕ = pente** (vers le haut = plus raide), comme sur Pro-MB ;
+  - ligne / courbe pointillée de couleur = seuil (en « Seuil auto », elle suit le spectre moyen de la source) ;
+  - **courbe bleue = réduction max**, façonnable comme un EQ : double-clic dessus = ajouter un point,
+    glisser = fréquence / profondeur, molette = largeur, double-clic ou clic droit sur un point = supprimer ;
   - double-clic sur un bord ou sur le seuil = valeur par défaut, **Alt / Option** = réglage fin.
-- **Panneau de droite** : tous les réglages de la relation (Quantité, Réduction max, Seuil, Attaque,
-  Release, Plage, Résolution, Suivre la hiérarchie).
-- **En bas** : Dry/Wet, **Make-up** (gain de compensation, + **Auto** qui compense la perte de volume
-  moyenne mesurée), Lookahead, Stéréo / Mid / Side, **64 ou 128 bandes** (128 = plus fin dans les médiums
-  et les aigus, un peu plus de processeur), Delta, Bypass.
+- **Panneau de droite** : interrupteur de **bypass** de la relation (elle reste en place), Quantité, Attaque,
+  Release, Résolution, potards **Détail low / Détail high** (résolution plus fine ou plus large dans le bas / le haut
+  du spectre), **Soft / Hard** (Hard : réduction franche jusqu'à 70 dB), **Masking** (ne creuser que là où les deux
+  pistes ont de l'énergie), **Seuil auto**, **Suivre la hiérarchie**.
+- **Self** : avec un seuil fixe = compresseur multibande sans latence ; avec **Seuil auto** = suppresseur de
+  résonances (seuls les pics au-dessus du spectre lissé de la piste sont creusés).
+- **En bas** : Dry/Wet, **Make-up** (+ Auto), Lookahead (+ interrupteur **Auto** = calé sur le délai de synchro),
+  Stéréo / Mid / Side, 64 ou 128 bandes, Delta, Bypass. En bypass (ou Bypass all), l'affichage se grise.
 
 ### Vue Matrice (vue d'ensemble)
 - **Hiérarchie** (à gauche) : glissez-déposez pour changer l'ordre. ★ = instance maîtresse (porte la macro
@@ -73,8 +73,10 @@ Breath apparaît dans *Plug-ins → Breath*. Si vous remplacez une ancienne vers
   de Priorité la fait basculer) ; désactivé = relation libre, toujours active.
 
 ### Barre du haut (partout)
-Undo / Redo · Snapshots **A / B / C** (vos modifications sont enregistrées dans le snapshot actif ;
-cliquez sur un autre pour basculer) · macro **Breath** (0–100 %) · **Bypass all**.
+**Famille** (α Alpha, β Bêta, γ Gamma, σ Sigma, ω Oméga — clic sur la lettre) : seules les instances d'une même
+famille se voient et se creusent ; chaque famille a sa macro, son Bypass all et son instance maîtresse ·
+Undo / Redo · Snapshots **A / B** (+ **A→B** pour copier A dans B ; les modifications vont dans le snapshot actif) ·
+macro **Breath** (0–100 %) · **Bypass all**.
 
 ---
 
