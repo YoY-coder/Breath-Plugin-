@@ -9,3 +9,14 @@ Liste tenue à jour au fil des retours. Rien de ce qui est ici n'est encore cod�
 - [x] (V0.2) **Seuil « soft » (knee réglable)** : la réduction démarre progressivement autour du seuil
       au lieu de s'enclencher d'un coup (knee de 0 dB = dur, jusqu'à ~24 dB = très doux).
       *« nid » = knee : confirmé dans la conversation.*
+
+## Automation (retour du 21/11) — très important
+- [ ] **Tout doit être automatisable dans le DAW.**
+  Aujourd'hui seuls quelques réglages d'instance le sont (Priorité, Breath, Bypass, Bypass all, Delta, Dry/Wet,
+  Make-up, Make-up auto, Stéréo). Les réglages de relation vivent dans la mémoire partagée et ne sont pas
+  visibles par le DAW.
+  Piste retenue : chaque instance expose des « emplacements de relation » fixes (ex. 8 sources + Self) avec
+  tous leurs réglages (on/off, Quantité, Attaque, Release, Résolution, Détail low/high, Soft/Hard, Masking,
+  Seuil auto, plage basse/haute, pentes, seuil, réduction max, knee…), nommés d'après la piste source.
+  L'automation est lue par l'instance creusée → export toujours identique au temps réel.
+  Cas particuliers à trancher : Lookahead (change la latence), Famille, 64/128 bandes, points des courbes.
