@@ -23,3 +23,32 @@ Liste tenue à jour au fil des retours. Rien de ce qui est ici n'est encore cod�
   **Décisions (21/11)** : pas d'automation pour le Lookahead ni pour la résolution (64/128 bandes).
   Priorité : **Quantité** et **seuil global** (niveau de la courbe de seuil / décalage du seuil auto) de chaque
   relation automatisables. Le reste des réglages de relation suivra le même mécanisme si c'est simple.
+
+## Retours du 21/11 (inspirés de Soothe 3 et FabFilter)
+### Tilt (attaque / release / détail)
+- [ ] **Tilt d'attaque et de release** : différence de vitesse entre le bas et le haut du spectre,
+      de ×0,1 à ×10 de chaque côté. Widget comme Soothe 3 : deux petites cases (bas | haut) avec une courbe,
+      réglées en glissant ↕ — pas des potards. Défaut ×1 (aucun changement de son pour les anciens projets).
+- [ ] Passer **Détail low / high** sur le même widget « tilt » (cohérence visuelle).
+### Stéréo
+- [ ] Section stéréo façon Soothe : mode **L/R** ou **M/S** ; **Link** (0–100 %) qui lie gauche/droite ou mid/side ;
+      **Focus** pour cibler plutôt un côté (mid ou side, gauche ou droite) ou les deux (ex. « 53 | 100 »).
+      Remplace le sélecteur Stéréo / Mid / Side actuel (conversion des anciens projets à prévoir).
+### Affectations
+- [ ] **État initial d'une nouvelle instance : Self activé.**
+- [ ] **Petite croix en haut à droite de chaque pastille** (Self, Kick…) pour retirer l'affectation.
+- [ ] Clic droit sur une pastille : ne garder que le **bypass**, et afficher le menu **sous la pastille**
+      (aujourd'hui il apparaît sous le graphe).
+### Graphique
+- [ ] **Étiquettes** : seuil à droite, max à gauche ; **poignée du knee** de l'autre côté (aujourd'hui cachée par la
+      courbe max).
+- [ ] **Ctrl + glisser sur un point** (courbe max et courbe seuil) = régler sa largeur (Q), en plus de la molette.
+- [ ] **Shift = réglage fin partout** (convention FabFilter), à la place d'Alt.
+- [ ] **Mode Hard : −70 dB tout en bas du graphe** (aujourd'hui −70 dB est au milieu, la moitié basse ne sert à rien).
+### Réglages
+- [ ] **Attaque jusqu'à 300 ms** (défaut inchangé : 5 ms ; les sessions existantes gardent leurs valeurs).
+- [ ] **64 / 128 bandes** déplacé à côté du réglage Résolution (dans le panneau de relation).
+### Noms de piste
+- [ ] **Vrais noms des pistes Ableton** au lieu de « Piste 1, Piste 2 ». Piste : Ableton envoie bien la couleur ;
+      Breath efface peut-être le nom quand un message n'apporte que la couleur → ne mettre à jour le nom que s'il est
+      fourni. À vérifier dans Ableton ; sinon le renommage manuel (double-clic) reste la solution.
