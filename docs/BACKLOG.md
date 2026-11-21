@@ -20,3 +20,6 @@ Liste tenue à jour au fil des retours. Rien de ce qui est ici n'est encore cod�
   Seuil auto, plage basse/haute, pentes, seuil, réduction max, knee…), nommés d'après la piste source.
   L'automation est lue par l'instance creusée → export toujours identique au temps réel.
   Cas particuliers à trancher : Lookahead (change la latence), Famille, 64/128 bandes, points des courbes.
+  **Décisions (21/11)** : pas d'automation pour le Lookahead ni pour la résolution (64/128 bandes).
+  Priorité : **Quantité** et **seuil global** (niveau de la courbe de seuil / décalage du seuil auto) de chaque
+  relation automatisables. Le reste des réglages de relation suivra le même mécanisme si c'est simple.
