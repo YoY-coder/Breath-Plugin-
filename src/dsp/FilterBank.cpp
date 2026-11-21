@@ -77,9 +77,12 @@ namespace breath
         for (auto& ch : state)
             for (auto& st : ch)
                 st = {};
-        m1.fill (0.0f);
-        m1Mid.fill (0.0f);
-        m1Goal.fill (0.0f);
+        for (int c = 0; c < kMaxChannels; ++c)
+        {
+            m1[c].fill (0.0f);
+            m1Mid[c].fill (0.0f);
+            m1Goal[c].fill (0.0f);
+        }
         isActive.fill (false);
         numActive = 0;
     }
@@ -91,13 +94,12 @@ namespace breath
         return kDamp[(size_t) b] * (A2 - 1.0f);
     }
 
-    void FilterBank::setReductions (const float* target) noexcept
+    void FilterBank::solveGains (const float* target, float* g) const noexcept
     {
         // Gains individuels tels que la cascade reproduise la courbe voulue
         // (quelques itérations de correction, gains toujours ≥ 0 dB de réduction).
-        std::array<float, kNumBands> g {};
         for (int b = 0; b < nb; ++b)
-            g[(size_t) b] = target[b] / overlapSum;
+            g[b] = target[b] / overlapSum;
 
         for (int it = 0; it < 3; ++it)
         {
@@ -109,18 +111,33 @@ namespace breath
                 {
                     const int j = b + d;
                     if (j >= 0 && j < nb)
-                        approx += overlap[(size_t) b][(size_t) (d + kSpread)] * g[(size_t) j];
+                        approx += overlap[(size_t) b][(size_t) (d + kSpread)] * g[j];
                 }
-                next[(size_t) b] = juce::jmax (0.0f, g[(size_t) b] + (target[b] - approx) / overlapSum);
+                next[(size_t) b] = juce::jmax (0.0f, g[b] + (target[b] - approx) / overlapSum);
             }
-            g = next;
+            for (int b = 0; b < nb; ++b) g[b] = next[(size_t) b];
         }
+    }
 
-        // Les coefficients rejoignent leur cible en douceur (voir advance()).
+    void FilterBank::setReductions (const float* target) noexcept
+    {
+        setReductions (target, target);
+    }
+
+    void FilterBank::setReductions (const float* targetA, const float* targetB) noexcept
+    {
+        std::array<float, kNumBands> gA {}, gB {};
+        solveGains (targetA, gA.data());
+        if (targetB == targetA) gB = gA;
+        else                    solveGains (targetB, gB.data());
+
+        // Les gains rejoignent leur cible en douceur (voir processStereo / processMono).
         numActive = 0;
         for (int b = 0; b < nb; ++b)
         {
-            const bool want = usable[(size_t) b] && g[(size_t) b] > 0.005f;   // < 0,005 dB : inaudible
+            const bool wantA = usable[(size_t) b] && gA[(size_t) b] > 0.005f;   // < 0,005 dB : inaudible
+            const bool wantB = usable[(size_t) b] && gB[(size_t) b] > 0.005f;
+            const bool want = wantA || wantB;
             const bool wasActive = isActive[(size_t) b];
 
             if (! want && ! wasActive)
@@ -129,18 +146,25 @@ namespace breath
             if (! wasActive)
             {
                 // Activation : on part de la cloche neutre (m1 = 0), avec des états à zéro.
-                m1[(size_t) b] = m1Mid[(size_t) b] = 0.0f;
+                for (int c = 0; c < kMaxChannels; ++c) { m1[c][(size_t) b] = m1Mid[c][(size_t) b] = 0.0f; }
                 for (auto& ch : state) ch[(size_t) b] = {};
             }
-            else if (! want && std::abs (m1[(size_t) b]) < 1.0e-7f && std::abs (m1Mid[(size_t) b]) < 1.0e-7f)
+            else if (! want)
             {
-                // Désactivation une fois revenue (quasiment exactement) à la cloche neutre.
-                isActive[(size_t) b] = false;
-                for (auto& ch : state) ch[(size_t) b] = {};
-                continue;
+                bool neutral = true;
+                for (int c = 0; c < kMaxChannels; ++c)
+                    neutral = neutral && std::abs (m1[c][(size_t) b]) < 1.0e-7f && std::abs (m1Mid[c][(size_t) b]) < 1.0e-7f;
+                if (neutral)
+                {
+                    // Désactivation une fois revenue (quasiment exactement) à la cloche neutre.
+                    isActive[(size_t) b] = false;
+                    for (auto& ch : state) ch[(size_t) b] = {};
+                    continue;
+                }
             }
 
-            m1Goal[(size_t) b] = want ? m1For (b, g[(size_t) b]) : 0.0f;
+            m1Goal[0][(size_t) b] = wantA ? m1For (b, gA[(size_t) b]) : 0.0f;
+            m1Goal[1][(size_t) b] = wantB ? m1For (b, gB[(size_t) b]) : 0.0f;
             isActive[(size_t) b] = true;
             activeList[(size_t) numActive++] = b;
         }

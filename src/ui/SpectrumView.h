@@ -26,7 +26,7 @@ namespace breath::ui
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
     private:
-        enum class Target { none, lowEdge, highEdge, maxLine, threshold, node, thrNode, knee, selectOther, chip, addChip };
+        enum class Target { none, lowEdge, highEdge, maxLine, threshold, node, thrNode, knee, selectOther, chip, chipClose, addChip };
         struct Hit { Target t = Target::none; int slot = -1; int node = -1; };
 
         juce::Rectangle<float> graphArea() const;
@@ -51,7 +51,7 @@ namespace breath::ui
         int me = -1;
 
         std::vector<int> sources;                 // instances qui creusent cette piste (relations actives)
-        std::vector<std::pair<juce::Rectangle<float>, int>> chipAreas;
+        std::vector<std::pair<juce::Rectangle<float>, int>> chipAreas, chipCloseAreas;
         juce::Rectangle<float> addChipArea;
 
         std::array<float, kNumBands> own {}, reduction {};

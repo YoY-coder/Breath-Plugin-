@@ -26,6 +26,9 @@ namespace breath
         // calculs, elle est interpolée (pas de marches dans la détection des graves).
         void compute (float* bandsDb, int phase) noexcept;
 
+        // Analyse courte seule (utilisée pour comparer les deux voies stéréo).
+        void computeShort (float* bandsDb) noexcept { shortFft.run (history, writePos, mask, bandsDb); }
+
         static constexpr int kLowsEvery = 4;   // analyse des graves toutes les 4 trames
 
     private:

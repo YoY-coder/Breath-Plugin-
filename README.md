@@ -45,22 +45,23 @@ Breath apparaît dans *Plug-ins → Breath*. Si vous remplacez une ancienne vers
 ### Vue Instance (tout se règle ici)
 - Spectre de la piste (gris), spectres des pistes qui la creusent (à leur couleur), courbe de réduction (bleu).
 - **Pastilles de couleur** en haut : une par piste qui creuse celle-ci (+ **Self**). Clic = régler cette relation ;
-  clic droit = bypass / retirer ; **« + »** = ajouter une piste ou **Self** (la piste se creuse elle-même).
+  croix = retirer ; clic droit = bypass ; **« + »** = ajouter une piste ou **Self** (une nouvelle instance démarre en Self).
 - **Directement sur le graphique** (relation sélectionnée) :
   - bords de la zone : glisser **↔ = fréquence**, **↕ = pente** (vers le haut = plus raide), comme sur Pro-MB ;
   - ligne / courbe pointillée de couleur = seuil (en « Seuil auto », elle suit le spectre moyen de la source),
     façonnable par points comme la courbe max ; poignée **≡** = **knee** (seuil soft) ;
   - **courbe bleue = réduction max**, façonnable comme un EQ : double-clic dessus = ajouter un point,
     glisser = fréquence / profondeur, molette = largeur, double-clic ou clic droit sur un point = supprimer ;
-  - double-clic sur un bord ou sur le seuil = valeur par défaut, **Alt / Option** = réglage fin.
-- **Panneau de droite** : interrupteur de **bypass** de la relation (elle reste en place), Quantité, Attaque,
-  Release, Résolution, potards **Détail low / Détail high** (résolution plus fine ou plus large dans le bas / le haut
-  du spectre), **Soft / Hard** (Hard : réduction franche jusqu'à 70 dB), **Masking** (ne creuser que là où les deux
+  - double-clic sur un bord ou sur la poignée du seuil = valeur par défaut, **Shift** = réglage fin,
+    **Ctrl + glisser** sur un point = largeur.
+- **Panneau de droite** : interrupteur de **bypass** de la relation (elle reste en place), Quantité, Attaque (jusqu'à
+  300 ms), Release, Résolution, **tilt bas | haut** pour Détail, Attaque et Release (glisser ↕), **64 | 128 bandes**,
+  **Soft / Hard** (Hard : réduction franche jusqu'à 70 dB), **Masking** (ne creuser que là où les deux
   pistes ont de l'énergie), **Seuil auto**, **Suivre la hiérarchie**.
 - **Self** : avec un seuil fixe = compresseur multibande sans latence ; avec **Seuil auto** = suppresseur de
   résonances (seuls les pics au-dessus du spectre lissé de la piste sont creusés).
 - **En bas** : Dry/Wet, **Make-up** (+ Auto), Lookahead (+ interrupteur **Auto** = calé sur le délai de synchro),
-  Stéréo / Mid / Side, 64 ou 128 bandes, Delta, Bypass. En bypass (ou Bypass all), l'affichage se grise.
+  Stéréo (**L/R ou M/S**, **Link**, **Focus**), Delta, Bypass. En bypass (ou Bypass all), l'affichage se grise.
 
 ### Vue Matrice (vue d'ensemble)
 - **Hiérarchie** (à gauche) : glissez-déposez pour changer l'ordre. ★ = instance maîtresse (porte la macro
@@ -72,6 +73,11 @@ Breath apparaît dans *Plug-ins → Breath*. Si vous remplacez une ancienne vers
   - clic = sélectionner, double-clic = activer / désactiver ; la couleur montre ce qui est retiré en direct.
 - **Suivre la hiérarchie** (réglage de chaque relation) : activé = la relation suit l'ordre (et l'automation
   de Priorité la fait basculer) ; désactivé = relation libre, toujours active.
+
+### Automation
+Chaque piste expose des emplacements « Self » + 8 sources, nommés d'après la piste qui creuse
+(ex. « Kick – Quantité », « Kick – Seuil ») : la Quantité et le seuil global de chaque relation s'automatisent
+dans Ableton, comme Breath, Dry/Wet, Make-up, Link, Focus, Bypass, Priorité…
 
 ### Barre du haut (partout)
 **Famille** (α Alpha, β Bêta, γ Gamma, σ Sigma, ω Oméga — clic sur la lettre) : seules les instances d'une même

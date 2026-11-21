@@ -216,9 +216,17 @@ int main()
         s.nodes[0] = { 120.0f, -3.0f, 1.0f };     // point de façonnage : protège un peu 120 Hz
         s.lowSlope = 0.1f; s.highSlope = 1.5f;    // pentes : raide en bas, douce en haut
         s.knee = 6.0f;                            // seuil « soft »
+        s.attackTiltLow = 3.0f; s.releaseTiltHigh = 0.3f;   // tilts d'attaque / release
         s.numThrNodes = 1;
         s.thrNodes[0] = { 60.0f, -4.0f, 1.0f };   // seuil abaissé autour de 60 Hz
         hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), s);
+    }
+    // Stéréo M/S non liée sur la basse (doit aussi être identique à l'export).
+    {
+        auto setP = [] (BreathAudioProcessor& pr, const char* id, float v) { auto* q = pr.getParams().getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+        setP (rig[1], "stereoType", 1.0f);
+        setP (rig[1], "link", 50.0f);
+        setP (rig[1], "focusB", 70.0f);
     }
     // La voix travaille en 128 bandes (doit aussi être identique à l'export).
     rig[2].getParams().getParameter ("bands")->setValueNotifyingHost (1.0f);
@@ -452,6 +460,71 @@ int main()
             std::printf ("        knee 12 dB : graves de la basse %.1f dB (knee 0 : %.1f dB)\n", soft, noNode);
             check (std::abs (soft - noNode) > 0.2f, "Knee : le seuil soft change bien la reduction");
             hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), saved);
+        }
+
+        // Automation : la Quantité et le seuil de la relation viennent des paramètres de la piste creusée.
+        {
+            const int slot = hub.getRelation (rig[0].getSlot(), rig[1].getSlot()).slot;
+            check (slot >= 1 && slot < breath::kNumSlots, "Automation : la relation Kick -> Basse a un emplacement (" + juce::String (slot) + ")");
+            auto* amt = rig[1].getParams().getParameter ("slot" + juce::String (slot) + "_amount");
+            const float savedAmt = amt->getValue();
+            check (std::abs (hub.relationAmount (rig[0].getSlot(), rig[1].getSlot()) - hub.getRelation (rig[0].getSlot(), rig[1].getSlot()).amount) < 1e-3f,
+                   "Automation : le parametre Quantite reprend la valeur reglee");
+            amt->setValueNotifyingHost (0.0f);
+            const float noAmt = lowLevel (rig.render ({ 256 }, 0, 41), 1, lat);
+            check (std::abs (noAmt - ref) < 1.5f, "Automation : Quantite a 0 % -> plus de creusage");
+            amt->setValueNotifyingHost (savedAmt);
+            auto* thr = rig[1].getParams().getParameter ("slot" + juce::String (slot) + "_thr");
+            auto high = hub.getRelation (rig[0].getSlot(), rig[1].getSlot());
+            const auto savedRel = high;
+            high.threshold = -5.0f;                 // seuil haut : presque rien n'est creusé…
+            hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), high);
+            const float before = lowLevel (rig.render ({ 256 }, 0, 42), 1, lat);
+            thr->setValueNotifyingHost (thr->convertTo0to1 (-20.0f));
+            const float lowered = lowLevel (rig.render ({ 256 }, 0, 43), 1, lat);
+            std::printf ("        automation du seuil -20 dB : %.1f dB -> %.1f dB\n", before, lowered);
+            check (lowered < before - 1.0f, "Automation : le seuil global abaisse le seuil");
+            thr->setValueNotifyingHost (thr->convertTo0to1 (0.0f));
+            hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), savedRel);
+            check (rig[1].getSlotName (slot).isNotEmpty(), "Automation : l'emplacement porte un nom");
+        }
+
+        // Focus 0 / 0 : aucune voie traitée.
+        {
+            auto setP = [] (BreathAudioProcessor& pr, const char* id, float v) { auto* q = pr.getParams().getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+            setP (rig[1], "focusA", 0.0f); setP (rig[1], "focusB", 0.0f);
+            const float nofocus = lowLevel (rig.render ({ 256 }, 0, 44), 1, lat);
+            check (std::abs (nofocus - ref) < 1.0f, "Stereo : Focus 0 | 0 -> aucune voie creusee");
+            setP (rig[1], "focusA", 100.0f); setP (rig[1], "focusB", 70.0f);
+        }
+
+        // Noms de piste : un message qui n'apporte que la couleur ne doit pas effacer le nom.
+        {
+            hub.setDawTrackInfo (rig[2].getSlot(), juce::String ("Lead Vox"), std::nullopt);
+            hub.setDawTrackInfo (rig[2].getSlot(), std::nullopt, juce::Colours::red);
+            check (hub.displayName (rig[2].getSlot()) == "Lead Vox", "Noms de piste : le nom reste apres une mise a jour de couleur seule");
+        }
+
+        // Ancien projet (Stéréo / Mid / Side) : conversion en M/S + Focus.
+        {
+            std::unique_ptr<BreathAudioProcessor> old (static_cast<BreathAudioProcessor*> (createPluginFilter()));
+            auto* sm = old->getParams().getParameter ("stereoMode");
+            sm->setValueNotifyingHost (sm->convertTo0to1 (2.0f));    // ancien « Side »
+            juce::MemoryBlock mb;
+            old->getStateInformation (mb);
+            auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+            auto st = juce::ValueTree::fromXml (*xml);
+            auto params = st.getChildWithName (old->getParams().state.getType());
+            for (auto* id : { "stereoType", "link", "focusA", "focusB" })
+                params.removeChild (params.getChildWithProperty ("id", id), nullptr);
+            juce::MemoryBlock mb2;
+            juce::AudioProcessor::copyXmlToBinary (*st.createXml(), mb2);
+            std::unique_ptr<BreathAudioProcessor> reloaded (static_cast<BreathAudioProcessor*> (createPluginFilter()));
+            reloaded->setStateInformation (mb2.getData(), (int) mb2.getSize());
+            const auto raw = [&] (const char* id) { return reloaded->getParams().getRawParameterValue (id)->load(); };
+            std::printf ("        conversion : stereoType %.1f focusA %.1f focusB %.1f stereoMode %.1f\n", raw ("stereoType"), raw ("focusA"), raw ("focusB"), raw ("stereoMode"));
+            check (raw ("stereoType") > 0.5f && raw ("focusA") < 0.5f && raw ("focusB") > 99.0f,
+                   "Ancien projet : « Side » converti en M/S, Focus M 0 | S 100");
         }
 
         // Snapshots : copier A dans B.

@@ -18,6 +18,7 @@ namespace breath
     constexpr float kSilenceDb    = -120.0f;
     constexpr int kDefaultSyncDelay = 512;  // délai de synchro par défaut (échantillons)
     constexpr int kNumFamilies    = 5;      // Alpha, Bêta, Gamma, Sigma, Oméga
+    constexpr int kNumSlots       = 9;      // emplacements d'automation par piste : Self + 8 sources
 
     static_assert (kHop % kTick == 0, "le pas d'analyse doit être un multiple du pas de contrôle");
 
@@ -84,6 +85,9 @@ namespace breath
         float autoOffset  = 3.0f;    // seuil auto : dB au-dessus du spectre moyen
         float detailLow   = 0.0f;    // -1..1 : résolution plus grossière / plus fine dans le bas du spectre
         float detailHigh  = 0.0f;    // -1..1 : idem dans le haut du spectre
+        float attackTiltLow = 1.0f, attackTiltHigh = 1.0f;     // ×0,1 .. ×10 : attaque dans le bas / le haut
+        float releaseTiltLow = 1.0f, releaseTiltHigh = 1.0f;   // ×0,1 .. ×10 : release dans le bas / le haut
+        int   slot        = -1;      // emplacement d'automation chez la piste creusée (0 = Self, 1..8 = sources)
         float amount      = 0.5f;    // 0..1 (dB de réduction par dB au-dessus du seuil)
         float maxReduction = 6.0f;   // dB (positif)
         float threshold   = -30.0f;  // dBFS
@@ -167,6 +171,8 @@ namespace breath
     {
         std::atomic<bool>  assigned { true }, enabled { true }, followOrder { true }, hard { false }, masking { false }, autoThreshold { false };
         std::atomic<float> autoOffset { 3.0f }, detailLow { 0.0f }, detailHigh { 0.0f };
+        std::atomic<float> atkTiltLo { 1.0f }, atkTiltHi { 1.0f }, relTiltLo { 1.0f }, relTiltHi { 1.0f };
+        std::atomic<int>   slot { -1 };
         std::atomic<float> amount { 0.5f }, maxReduction { 6.0f }, threshold { -30.0f },
                            attackMs { 5.0f }, releaseMs { 120.0f },
                            lowHz { 20.0f }, highHz { 20000.0f }, lowSlope { 0.3f }, highSlope { 0.3f }, resolution { 0.6f };
@@ -205,6 +211,11 @@ namespace breath
             autoOffset.store (s.autoOffset, std::memory_order_relaxed);
             detailLow.store (s.detailLow, std::memory_order_relaxed);
             detailHigh.store (s.detailHigh, std::memory_order_relaxed);
+            atkTiltLo.store (s.attackTiltLow, std::memory_order_relaxed);
+            atkTiltHi.store (s.attackTiltHigh, std::memory_order_relaxed);
+            relTiltLo.store (s.releaseTiltLow, std::memory_order_relaxed);
+            relTiltHi.store (s.releaseTiltHigh, std::memory_order_relaxed);
+            slot.store (s.slot, std::memory_order_relaxed);
             assigned.store (s.assigned, std::memory_order_relaxed);
             enabled.store (s.enabled, std::memory_order_release);
         }
@@ -222,6 +233,11 @@ namespace breath
             s.autoOffset   = autoOffset.load (std::memory_order_relaxed);
             s.detailLow    = detailLow.load (std::memory_order_relaxed);
             s.detailHigh   = detailHigh.load (std::memory_order_relaxed);
+            s.attackTiltLow   = atkTiltLo.load (std::memory_order_relaxed);
+            s.attackTiltHigh  = atkTiltHi.load (std::memory_order_relaxed);
+            s.releaseTiltLow  = relTiltLo.load (std::memory_order_relaxed);
+            s.releaseTiltHigh = relTiltHi.load (std::memory_order_relaxed);
+            s.slot         = slot.load (std::memory_order_relaxed);
             s.amount       = amount.load (std::memory_order_relaxed);
             s.maxReduction = maxReduction.load (std::memory_order_relaxed);
             s.threshold    = threshold.load (std::memory_order_relaxed);

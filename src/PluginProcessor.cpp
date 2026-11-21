@@ -13,6 +13,32 @@ namespace
     inline int64_t floorMod (int64_t a, int64_t b) noexcept { const auto m = a % b; return m < 0 ? m + b : m; }
 }
 
+static void setParam (juce::RangedAudioParameter* p, float plainValue);
+
+//==============================================================================
+juce::String SlotParameter::getName (int maximumStringLength) const
+{
+    const auto prefix = owner != nullptr ? owner->getSlotName (slot) : (slot == 0 ? juce::String ("Self") : "Source " + juce::String (slot));
+    return (prefix + juce::String::fromUTF8 (" – ") + AudioParameterFloat::getName (100)).substring (0, maximumStringLength);
+}
+
+juce::String BreathAudioProcessor::getSlotName (int k) const
+{
+    const juce::SpinLock::ScopedLockType sl (slotNameLock);
+    return slotNames[(size_t) juce::jlimit (0, kNumSlots - 1, k)];
+}
+
+float BreathAudioProcessor::getSlotAmount (int k) const
+{
+    return (k >= 0 && k < kNumSlots) ? pSlotAmount[(size_t) k]->load() / 100.0f : -1.0f;
+}
+
+void BreathAudioProcessor::setSlotAmountFromHub (int k, float v)
+{
+    if (k >= 0 && k < kNumSlots)
+        setParam (apvts.getParameter ("slot" + juce::String (k) + "_amount"), juce::jlimit (0.0f, 1.0f, v) * 100.0f);
+}
+
 //==============================================================================
 juce::AudioProcessorValueTreeState::ParameterLayout BreathAudioProcessor::createLayout()
 {
@@ -40,8 +66,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout BreathAudioProcessor::create
                     AudioParameterBoolAttributes().withAutomatable (false)));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "bands", 1 }, String::fromUTF8 ("Résolution max"),
                     StringArray { "64 bandes", "128 bandes" }, 0, AudioParameterChoiceAttributes().withAutomatable (false)));
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "stereoMode", 1 }, String::fromUTF8 ("Mode stéréo"),
-                    StringArray { String::fromUTF8 ("Stéréo"), "Mid", "Side" }, 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "stereoType", 1 }, String::fromUTF8 ("Stéréo"),
+                    StringArray { "L/R", "M/S" }, 0));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "link", 1 }, "Link",
+                    NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f, AudioParameterFloatAttributes().withLabel ("%")));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "focusA", 1 }, "Focus L/M",
+                    NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f, AudioParameterFloatAttributes().withLabel ("%")));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "focusB", 1 }, "Focus R/S",
+                    NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f, AudioParameterFloatAttributes().withLabel ("%")));
+
+    // Emplacements d'automation des relations : Quantité et décalage du seuil (Self + 8 sources).
+    for (int k = 0; k < kNumSlots; ++k)
+    {
+        layout.add (std::make_unique<SlotParameter> (ParameterID { "slot" + String (k) + "_amount", 1 }, String::fromUTF8 ("Quantité"),
+                        NormalisableRange<float> (0.0f, 100.0f, 0.1f), 50.0f, AudioParameterFloatAttributes().withLabel ("%"), k));
+        layout.add (std::make_unique<SlotParameter> (ParameterID { "slot" + String (k) + "_thr", 1 }, "Seuil",
+                        NormalisableRange<float> (-24.0f, 24.0f, 0.1f), 0.0f, AudioParameterFloatAttributes().withLabel ("dB"), k));
+    }
+
+    // Ancien sélecteur Stéréo / Mid / Side (V0.1–V0.2), gardé pour relire les anciens projets.
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "stereoMode", 1 }, String::fromUTF8 ("Mode stéréo (ancien)"),
+                    StringArray { String::fromUTF8 ("Stéréo"), "Mid", "Side" }, 0, AudioParameterChoiceAttributes().withAutomatable (false)));
     return layout;
 }
 
@@ -59,6 +104,17 @@ BreathAudioProcessor::BreathAudioProcessor()
     pMix       = apvts.getRawParameterValue ("mix");
     pLookahead = apvts.getRawParameterValue ("lookahead");
     pStereo    = apvts.getRawParameterValue ("stereoMode");
+    pStereoType = apvts.getRawParameterValue ("stereoType");
+    pLink      = apvts.getRawParameterValue ("link");
+    pFocusA    = apvts.getRawParameterValue ("focusA");
+    pFocusB    = apvts.getRawParameterValue ("focusB");
+    for (int k = 0; k < kNumSlots; ++k)
+    {
+        pSlotAmount[(size_t) k] = apvts.getRawParameterValue ("slot" + juce::String (k) + "_amount");
+        pSlotThr[(size_t) k]    = apvts.getRawParameterValue ("slot" + juce::String (k) + "_thr");
+        if (auto* sp = dynamic_cast<SlotParameter*> (apvts.getParameter ("slot" + juce::String (k) + "_amount"))) sp->owner = this;
+        if (auto* sp = dynamic_cast<SlotParameter*> (apvts.getParameter ("slot" + juce::String (k) + "_thr")))    sp->owner = this;
+    }
     pMakeup    = apvts.getRawParameterValue ("makeup");
     pBands     = apvts.getRawParameterValue ("bands");
     pFamily    = apvts.getRawParameterValue ("family");
@@ -129,6 +185,20 @@ void BreathAudioProcessor::setBypassAllFromHub (bool b)     { setParam (apvts.ge
 
 void BreathAudioProcessor::timerCallback()
 {
+    // Noms des emplacements d'automation (« Kick – Quantité »…), mis à jour quand les affectations changent.
+    if (slotIndex >= 0)
+    {
+        bool changed = false;
+        for (int k = 0; k < kNumSlots; ++k)
+        {
+            const auto nm = hub->slotSourceName (slotIndex, k);
+            const juce::SpinLock::ScopedLockType sl (slotNameLock);
+            if (slotNames[(size_t) k] != nm) { slotNames[(size_t) k] = nm; changed = true; }
+        }
+        if (changed)
+            updateHostDisplay (ChangeDetails().withParameterInfoChanged (true));
+    }
+
     if (slotIndex >= 0 && hub->familyOf (slotIndex) != getFamily())
         hub->setFamily (slotIndex, getFamily());
 
@@ -141,6 +211,13 @@ void BreathAudioProcessor::timerCallback()
             if (s != slotIndex && hub->info (s).client != nullptr)
                 maxRank = juce::jmax (maxRank, hub->info (s).client->getRank());
         setRankFromHub (juce::jmin (kMaxInstances, maxRank + 1));
+
+        // Nouvelle instance : Self activé d'office (anti-résonances, seuil auto).
+        auto self = hub->getRelation (slotIndex, slotIndex);
+        self.assigned = true;
+        self.enabled = true;
+        self.autoThreshold = true;
+        hub->setRelation (slotIndex, slotIndex, self);
         hub->sendChangeMessage();
     }
 }
@@ -162,6 +239,8 @@ void BreathAudioProcessor::prepareToPlay (double sampleRate, int)
     sr = sampleRate;
     currentSampleRate = sampleRate;
     analyzer.prepare (sampleRate);
+    anaA.prepare (sampleRate);
+    anaB.prepare (sampleRate);
     bank.prepare (sampleRate, filterBandsWanted());
 
     const int maxDelay = (int) std::ceil (0.05 * sampleRate) + 2;   // 50 ms (lookahead auto compris)
@@ -197,6 +276,10 @@ bool BreathAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 void BreathAudioProcessor::resetDsp()
 {
     analyzer.reset();
+    anaA.reset();
+    anaB.reset();
+    chA.fill (kSilenceDb);
+    chB.fill (kSilenceDb);
     bank.reset();
     for (auto& e : env) e.fill (0.0f);
     weight.fill (0.0f);
@@ -426,9 +509,17 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
         }
 
         const auto& relA = hub->relation (u, slotIndex);
-        const auto rel = relA.load();
+        auto rel = relA.load();
         float target = lastTarget[(size_t) u];
         const bool srcValid = isSelf || got[(size_t) u];
+
+        // Automation : Quantité et décalage du seuil viennent de l'emplacement de cette relation.
+        float thrShift = 0.0f;
+        if (rel.slot >= 0 && rel.slot < kNumSlots)
+        {
+            rel.amount = pSlotAmount[(size_t) rel.slot]->load() / 100.0f;
+            thrShift = pSlotThr[(size_t) rel.slot]->load();
+        }
 
         if (isSelf)
         {
@@ -484,13 +575,13 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             {
                 if (! refInit[(size_t) u]) ref[(size_t) j] = sm[(size_t) j];
                 else                       ref[(size_t) j] += (sm[(size_t) j] - ref[(size_t) j]) * c;
-                thr[(size_t) j] = juce::jmax (-80.0f, ref[(size_t) j] + rel.autoOffset + thrOffsetGrid (relA, j, stride));
+                thr[(size_t) j] = juce::jmax (-80.0f, ref[(size_t) j] + rel.autoOffset + thrShift + thrOffsetGrid (relA, j, stride));
             }
             refInit[(size_t) u] = true;
         }
         else
         {
-            for (int j = 0; j < nb; ++j) thr[(size_t) j] = rel.threshold + thrOffsetGrid (relA, j, stride);
+            for (int j = 0; j < nb; ++j) thr[(size_t) j] = rel.threshold + thrShift + thrOffsetGrid (relA, j, stride);
         }
 
         // Réduction instantanée par bande (plage avec bords en fondu selon la pente).
@@ -570,16 +661,32 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             }
         }
 
-        // Attaque / release, puis poids de transition et macro Breath.
-        const float cA = 1.0f - std::exp (-tickSec / juce::jmax (0.0001f, rel.attackMs * 0.001f));
-        const float cR = 1.0f - std::exp (-tickSec / juce::jmax (0.001f, rel.releaseMs * 0.001f));
+        // Attaque / release (avec tilt bas / haut), puis poids de transition et macro Breath.
+        auto& tc = timeCache[(size_t) u];
+        auto differs = [] (float x, float y) { return ! juce::exactlyEqual (x, y); };
+        if (differs (tc.attack, rel.attackMs) || differs (tc.release, rel.releaseMs) || tc.nb != nb
+            || differs (tc.aLo, rel.attackTiltLow) || differs (tc.aHi, rel.attackTiltHigh)
+            || differs (tc.rLo, rel.releaseTiltLow) || differs (tc.rHi, rel.releaseTiltHigh))
+        {
+            tc.attack = rel.attackMs; tc.release = rel.releaseMs; tc.nb = nb;
+            tc.aLo = rel.attackTiltLow; tc.aHi = rel.attackTiltHigh; tc.rLo = rel.releaseTiltLow; tc.rHi = rel.releaseTiltHigh;
+            const float laLo = std::log (juce::jlimit (0.1f, 10.0f, tc.aLo)), laHi = std::log (juce::jlimit (0.1f, 10.0f, tc.aHi));
+            const float lrLo = std::log (juce::jlimit (0.1f, 10.0f, tc.rLo)), lrHi = std::log (juce::jlimit (0.1f, 10.0f, tc.rHi));
+            for (int j = 0; j < nb; ++j)
+            {
+                const float t = detT[j];
+                const float am = std::exp (laLo + (laHi - laLo) * t), rm = std::exp (lrLo + (lrHi - lrLo) * t);
+                tc.cA[(size_t) j] = 1.0f - std::exp (-tickSec / juce::jmax (0.0001f, rel.attackMs * am * 0.001f));
+                tc.cR[(size_t) j] = 1.0f - std::exp (-tickSec / juce::jmax (0.001f, rel.releaseMs * rm * 0.001f));
+            }
+        }
         float activity = 0.0f;
 
         for (int j = 0; j < nb; ++j)
         {
             auto& ev = e[(size_t) j];
             const float t = inst[(size_t) j];
-            ev += (t - ev) * (t > ev ? cA : cR);
+            ev += (t - ev) * (t > ev ? tc.cA[(size_t) j] : tc.cR[(size_t) j]);
             const float c = ev * w * macro;
             total[(size_t) j] = juce::jmax (total[(size_t) j], c);
             activity = juce::jmax (activity, c);
@@ -588,7 +695,31 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
         me.activityFrom[(size_t) u].store (displayBypassed ? 0.0f : activity, std::memory_order_relaxed);
     }
 
-    bank.setReductions (total.data());
+    // Stéréo : Focus (part de chaque voie) et Link (100 % = même réduction sur les deux voies ;
+    // en dessous, la voie la plus forte dans une bande reçoit plus de réduction que l'autre).
+    std::array<float, kNumBands> totA {}, totB {};
+    {
+        const float link = juce::jlimit (0.0f, 1.0f, blockLink);
+        for (int j = 0; j < nb; ++j)
+        {
+            float wA = 1.0f, wB = 1.0f;
+            if (link < 0.999f)
+            {
+                float a = kSilenceDb, b = kSilenceDb;
+                for (int k = 0; k < stride; ++k)
+                {
+                    a = juce::jmax (a, chA[(size_t) (j * stride + k)]);
+                    b = juce::jmax (b, chB[(size_t) (j * stride + k)]);
+                }
+                const float peak = juce::jmax (a, b);
+                wA = std::exp ((a - peak) * 0.1151293f);   // rapport d'amplitude (≤ 1)
+                wB = std::exp ((b - peak) * 0.1151293f);
+            }
+            totA[(size_t) j] = total[(size_t) j] * blockFocusA * (link + (1.0f - link) * wA);
+            totB[(size_t) j] = total[(size_t) j] * blockFocusB * (link + (1.0f - link) * wB);
+        }
+    }
+    bank.setReductions (totA.data(), totB.data());
 
     // Make-up automatique : compense l'énergie retirée (mesurée sur le spectre de la piste).
     {
@@ -640,7 +771,10 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     const float mixT = pMix->load() / 100.0f;
     const float bypT = pBypass->load() > 0.5f ? 1.0f : 0.0f;
     const float deltaT = pDelta->load() > 0.5f ? 1.0f : 0.0f;
-    const int mode = juce::roundToInt (pStereo->load());
+    const int stType = juce::roundToInt (pStereoType->load());   // 0 = L/R, 1 = M/S
+    blockLink = pLink->load() / 100.0f;
+    blockFocusA = pFocusA->load() / 100.0f;
+    blockFocusB = pFocusB->load() / 100.0f;
 
     // Changement de résolution (64 ↔ 128 bandes) : on reconstruit la banque de filtres.
     if (filterBandsWanted() != bank.getNumBands())
@@ -713,8 +847,21 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         const float xR = right != nullptr ? right[i] : xL;
 
         analyzer.push (right != nullptr ? 0.5f * (xL + xR) : xL);
+        if (right != nullptr)
+        {
+            anaA.push (stType == 1 ? 0.5f * (xL + xR) : xL);
+            anaB.push (stType == 1 ? 0.5f * (xL - xR) : xR);
+        }
         if (floorMod (s + 1, kHop) == 0)
+        {
             publishFrame (s);
+            if (right != nullptr && blockLink < 0.999f)
+            {
+                // Link < 100 % : on compare les deux voies pour doser la réduction de chacune.
+                anaA.computeShort (chA.data());
+                anaB.computeShort (chB.data());
+            }
+        }
 
         // Lookahead : retard identique pour le signal traité et le signal dry.
         delayBuf[0][(size_t) delayWrite] = xL;
@@ -729,11 +876,11 @@ void BreathAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         {
             wL = wR = bank.processMono (dL);
         }
-        else if (mode == 1 || mode == 2)
+        else if (stType == 1)
         {
+            // Mid / Side : chaque voie reçoit sa propre réduction (Focus, Link).
             float mid = 0.5f * (dL + dR), side = 0.5f * (dL - dR);
-            if (mode == 1) mid = bank.processMono (mid);
-            else           side = bank.processMono (side);
+            bank.processStereo (mid, side);
             wL = mid + side;
             wR = mid - side;
         }
@@ -811,9 +958,25 @@ void BreathAudioProcessor::setStateInformation (const void* data, int sizeInByte
     savedEditorWidth = state.getProperty ("editorWidth", 0);
     currentView = state.getProperty ("view", 0);
 
-    const auto params = state.getChildWithName (apvts.state.getType());
+    // Attention : replaceState() complète l'arbre avec les paramètres manquants, d'où ces tests faits avant.
+    const auto params = state.getChildWithName (apvts.state.getType()).createCopy();
+    const bool hasStereoType = params.getChildWithProperty ("id", "stereoType").isValid();
+    const bool hasSlots = params.getChildWithProperty ("id", "slot0_amount").isValid();
     if (params.isValid())
+    {
         apvts.replaceState (params);
+
+        // Projets V0.1–V0.2 : conversion de l'ancien sélecteur Stéréo / Mid / Side.
+        if (! hasStereoType)
+        {
+            const int old = juce::roundToInt (pStereo->load());
+            auto set = [this] (const char* id, float v) { if (auto* p = apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+            set ("stereoType", old == 0 ? 0.0f : 1.0f);
+            set ("link", 100.0f);
+            set ("focusA", old == 2 ? 0.0f : 100.0f);
+            set ("focusB", old == 1 ? 0.0f : 100.0f);
+        }
+    }
 
     stateLoaded = true;
     rankAssigned = true;
@@ -837,6 +1000,9 @@ void BreathAudioProcessor::setStateInformation (const void* data, int sizeInByte
     if (model.isValid())
     {
         hub->mergeModel (model);
+        // Les emplacements d'automation reprennent les Quantités du projet (sauf si le projet les avait déjà).
+        if (! hasSlots)
+            hub->syncSlotAmounts (slotIndex);
         savedPeers = 0;
         for (const auto& p : model.getChildWithName ("Peers"))
             if (p["id"].toString() != instanceId.toString())
@@ -850,9 +1016,13 @@ void BreathAudioProcessor::updateTrackProperties (const TrackProperties& propert
     if (properties.colourARGB.has_value())
         colour = juce::Colour (*properties.colourARGB);
 
-    // Appelé par l'hôte sur le thread de l'interface.
+    // Appelé par l'hôte sur le thread de l'interface. On ne remplace que ce que l'hôte fournit
+    // (certains hôtes n'envoient que la couleur : il ne faut pas effacer le nom pour autant).
+    std::optional<juce::String> name;
+    if (properties.name.has_value() && properties.name->isNotEmpty())
+        name = *properties.name;
     if (slotIndex >= 0)
-        hub->setDawTrackInfo (slotIndex, properties.name.value_or (juce::String()), colour);
+        hub->setDawTrackInfo (slotIndex, name, colour);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

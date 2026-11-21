@@ -6,6 +6,22 @@
 #include "dsp/Analyzer.h"
 #include "dsp/FilterBank.h"
 
+class BreathAudioProcessor;
+
+// Paramètre d'un emplacement d'automation : son nom suit la piste source (« Kick – Quantité »).
+class SlotParameter final : public juce::AudioParameterFloat
+{
+public:
+    SlotParameter (const juce::ParameterID& id, const juce::String& suffix, juce::NormalisableRange<float> r, float def,
+                   const juce::AudioParameterFloatAttributes& attr, int slotIndex)
+        : AudioParameterFloat (id, suffix, r, def, attr), slot (slotIndex) {}
+
+    juce::String getName (int maximumStringLength) const override;
+
+    BreathAudioProcessor* owner = nullptr;
+    const int slot;
+};
+
 class BreathAudioProcessor final : public juce::AudioProcessor,
                                    public breath::HubClient,
                                    private juce::Timer
@@ -50,6 +66,9 @@ public:
     bool  getBypassAll() const override;
     void  setBypassAllFromHub (bool b) override;
     int   getFilterBands() const override { return filterBandsWanted(); }
+    float getSlotAmount (int slot) const override;
+    void  setSlotAmountFromHub (int slot, float v) override;
+    juce::String getSlotName (int slot) const;
     int   filterBandsWanted() const noexcept;
     int   getFamily() const noexcept;
     juce::AudioProcessorParameter* getBypassParameter() const override;
@@ -103,6 +122,14 @@ private:
     std::atomic<float>* pMakeup = nullptr;
     std::atomic<float>* pAutoMakeup = nullptr;
     std::atomic<float>* pBands = nullptr;
+    std::atomic<float>* pStereoType = nullptr;
+    std::atomic<float>* pLink = nullptr;
+    std::atomic<float>* pFocusA = nullptr;
+    std::atomic<float>* pFocusB = nullptr;
+    std::array<std::atomic<float>*, breath::kNumSlots> pSlotAmount {}, pSlotThr {};
+    mutable juce::SpinLock slotNameLock;
+    std::array<juce::String, breath::kNumSlots> slotNames { "Self", "Source 1", "Source 2", "Source 3", "Source 4",
+                                                           "Source 5", "Source 6", "Source 7", "Source 8" };
     std::atomic<float>* pFamily = nullptr;
     std::atomic<float>* pAutoLook = nullptr;
 
@@ -121,7 +148,18 @@ private:
     std::atomic<int> currentLatency { 0 };
     std::atomic<float> autoCompShown { 0.0f };
     double sr = 44100.0;
-    breath::Analyzer analyzer;
+    breath::Analyzer analyzer, anaA, anaB;                     // mono (publié) + deux voies (Link)
+    std::array<float, breath::kNumBands> chA {}, chB {};
+    float blockLink = 1.0f, blockFocusA = 1.0f, blockFocusB = 1.0f;
+
+    // Constantes d'attaque / release par bande (avec tilt), recalculées seulement si les réglages changent.
+    struct TimeCache
+    {
+        float attack = -1.0f, release = -1.0f, aLo = 1.0f, aHi = 1.0f, rLo = 1.0f, rHi = 1.0f;
+        int nb = 0;
+        std::array<float, breath::kNumBands> cA {}, cR {};
+    };
+    std::array<TimeCache, breath::kMaxInstances> timeCache {};
     breath::FilterBank bank;
 
     bool timelineMode = false;

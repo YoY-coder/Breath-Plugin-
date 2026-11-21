@@ -5,6 +5,15 @@ Chaque version est téléchargeable pour toujours dans l'onglet **Releases** du 
 Les projets enregistrés avec une version sont relus par les versions suivantes.
 Quand une version **change le son** à réglages identiques, c'est indiqué par ⚠️.
 
+## V0.3
+- Automation : Quantité et seuil global de chaque relation (emplacements Self + 8 sources nommés d'après la source).
+- Tilt bas | haut pour Détail, Attaque, Release (×0,1 à ×10).
+- Stéréo L/R ou M/S avec Link et Focus.
+- Croix sur les pastilles, clic droit = bypass ; nouvelle instance en Self.
+- Shift = réglage fin, Ctrl + glisser = largeur des points, échelle Hard jusqu'en bas, étiquettes réorganisées.
+- Attaque jusqu'à 300 ms ; 64 | 128 bandes déplacé ; noms de piste conservés.
+- Aucun changement de son pour les projets V0.1 / V0.2.
+
 ## V0.2
 - Courbe de seuil façonnable par points (comme la courbe max) : ajout, déplacement, largeur, suppression.
 - Seuil « soft » : knee réglable sur le graphique (0 à 24 dB), avec bande de visualisation.

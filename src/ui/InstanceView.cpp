@@ -35,8 +35,8 @@ namespace breath::ui
           lookAtt (p.getParams(), "lookahead", lookahead),
           autoMakeup (p.getParams(), "autoMakeup", "Auto"),
           autoLook (p.getParams(), "autoLookahead", ""),
-          stereo (*p.getParams().getParameter ("stereoMode"), { juce::String::fromUTF8 ("Stéréo"), "Mid", "Side" }),
-          bands (*p.getParams().getParameter ("bands"), { "64 bandes", "128 bandes" }),
+          stereo (*p.getParams().getParameter ("stereoType"), { "L/R", "M/S" }),
+          linkAtt (p.getParams(), "link", link),
           delta (p.getParams(), "delta", juce::String::fromUTF8 ("Delta")),
           bypass (p.getParams(), "bypass", "Bypass")
     {
@@ -60,10 +60,36 @@ namespace breath::ui
                                                       "La latence est déclarée au DAW (compensation automatique). 0 = aucune latence."));
         delta.setTooltip (juce::String::fromUTF8 ("Écouter uniquement ce que Breath retire."));
         stereo.fontSize = 11.0f;
-        bands.fontSize = 11.0f;
-        bands.setTooltip (juce::String::fromUTF8 ("Résolution maximale du filtrage de cette piste : 128 bandes = plus fin dans les médiums et les aigus, "
-                                                  "un peu plus de processeur."));
-        addAndMakeVisible (bands);
+        stereo.setTooltip (juce::String::fromUTF8 ("Traitement en gauche / droite (L/R) ou en mid / side (M/S)."));
+        for (auto* sl : { &link, &focus })
+        {
+            sl->setSliderStyle (juce::Slider::LinearHorizontal);
+            sl->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            sl->setVelocityModeParameters (0.25, 1, 0.0, true, juce::ModifierKeys::shiftModifier);
+            sl->onValueChange = [this] { repaint(); };
+            addAndMakeVisible (*sl);
+        }
+        link.setDoubleClickReturnValue (true, 100.0);
+        link.setTooltip (juce::String::fromUTF8 ("Link : 100 % = même réduction sur les deux voies. En dessous, chaque voie est "
+                                                 "creusée selon sa propre énergie."));
+        focus.setRange (-1.0, 1.0);
+        focus.setDoubleClickReturnValue (true, 0.0);
+        focus.setTooltip (juce::String::fromUTF8 ("Focus : vers la gauche, on cible plutôt L / Mid ; vers la droite, plutôt R / Side ; "
+                                                  "au centre, les deux à 100 %."));
+        focus.onValueChange = [this]
+        {
+            repaint();
+            if (focusUpdating) return;
+            const float b = (float) focus.getValue();
+            const float a = 100.0f * juce::jmin (1.0f, 1.0f - b), c = 100.0f * juce::jmin (1.0f, 1.0f + b);
+            for (auto [id, v] : { std::pair<const char*, float> { "focusA", a }, { "focusB", c } })
+                if (auto* prm = proc.getParams().getParameter (id))
+                    prm->setValueNotifyingHost (prm->convertTo0to1 (v));
+        };
+        focus.onDragStart = [this] { for (auto* id : { "focusA", "focusB" }) proc.getParams().getParameter (id)->beginChangeGesture(); };
+        focus.onDragEnd   = [this] { for (auto* id : { "focusA", "focusB" }) proc.getParams().getParameter (id)->endChangeGesture(); };
+        for (auto* sl : { &mix, &makeup, &lookahead })
+            sl->setVelocityModeParameters (0.25, 1, 0.0, true, juce::ModifierKeys::shiftModifier);
         addAndMakeVisible (autoMakeup);
         autoLook.setTooltip (juce::String::fromUTF8 ("Lookahead auto : se cale sur le délai de synchro entre instances "
                                                      "(réaction sans retard, avec la plus petite latence possible)."));
@@ -76,6 +102,21 @@ namespace breath::ui
     void InstanceView::tick()
     {
         spectrum.tick();
+        panel.tick();
+
+        // Focus : le curseur suit les paramètres (automation comprise).
+        if (! focus.isMouseButtonDown())
+        {
+            const float a = proc.getParams().getRawParameterValue ("focusA")->load() / 100.0f;
+            const float b = proc.getParams().getRawParameterValue ("focusB")->load() / 100.0f;
+            const float pos = a >= 0.999f && b >= 0.999f ? 0.0f : (a >= b ? -(1.0f - b) : (1.0f - a));
+            if (std::abs ((float) focus.getValue() - pos) > 1.0e-3f)
+            {
+                const juce::ScopedValueSetter<bool> svs (focusUpdating, true);
+                focus.setValue (pos, juce::dontSendNotification);
+                repaint (cards[3].getSmallestIntegerContainer());
+            }
+        }
         const bool byp = proc.isDisplayBypassed();
         if (byp != lastBypassed)
         {
@@ -106,8 +147,8 @@ namespace breath::ui
         panel.setBounds (panelCard.reduced (1.0f).toNearestInt());
 
         const float gap = 14.0f;
-        const float unit = (controls.getWidth() - 4.0f * gap) / 5.3f;
-        const float widths[] = { unit, unit * 1.15f, unit, unit * 1.15f, unit };
+        const float unit = (controls.getWidth() - 4.0f * gap) / 5.65f;
+        const float widths[] = { unit * 0.95f, unit * 1.1f, unit, unit * 1.7f, unit * 0.9f };
         float x = controls.getX();
         for (int i = 0; i < 5; ++i)
         {
@@ -122,9 +163,13 @@ namespace breath::ui
         lookahead.setBounds (inner (cards[2]).removeFromBottom (18.0f).toNearestInt().expanded (6, 0));
         autoLook.setBounds (inner (cards[2]).removeFromTop (16.0f).removeFromRight (36.0f).toNearestInt().expanded (0, 4));
         auto sc = inner (cards[3]).withTrimmedTop (18.0f);
-        stereo.setBounds (sc.removeFromTop (26.0f).toNearestInt());
+        auto row1 = sc.removeFromTop (24.0f);
+        stereo.setBounds (row1.removeFromLeft (78.0f).toNearestInt());
+        row1.removeFromLeft (10.0f);
+        link.setBounds (row1.toNearestInt().expanded (4, 0));
         sc.removeFromTop (6.0f);
-        bands.setBounds (sc.removeFromTop (26.0f).toNearestInt());
+        auto row2 = sc.removeFromTop (22.0f);
+        focus.setBounds (row2.withTrimmedLeft (40.0f).withTrimmedRight (62.0f).toNearestInt().expanded (4, 0));
         auto ec = inner (cards[4]).withTrimmedTop (18.0f);
         delta.setBounds (ec.removeFromTop (26.0f).toNearestInt());
         bypass.setBounds (ec.removeFromTop (26.0f).toNearestInt());
@@ -139,7 +184,7 @@ namespace breath::ui
         {
             drawCard (g, cards[(size_t) i]);
             auto in = cards[(size_t) i].reduced (14.0f, 12.0f);
-            const juce::String t = i == 3 ? juce::String::fromUTF8 ("Stéréo · résolution") : (i == 4 ? juce::String::fromUTF8 ("Écoute") : juce::String (titles[i]));
+            const juce::String t = i == 3 ? juce::String::fromUTF8 ("Stéréo") : (i == 4 ? juce::String::fromUTF8 ("Écoute") : juce::String (titles[i]));
             drawCaption (g, t, in.removeFromTop (14.0f));
         }
 
@@ -164,6 +209,23 @@ namespace breath::ui
         };
 
         value (cards[0], juce::String (juce::roundToInt (mix.getValue())), "%");
+
+        // Stéréo : Link et Focus (part de chaque voie)
+        {
+            auto in = cards[3].reduced (14.0f, 12.0f);
+            const bool ms = proc.getParams().getRawParameterValue ("stereoType")->load() > 0.5f;
+            g.setFont (font (11.0f, Weight::medium));
+            g.setColour (colours::text2);
+            g.drawText ("Link " + juce::String (juce::roundToInt (link.getValue())) + " %", in.removeFromTop (14.0f), juce::Justification::centredRight);
+            in.removeFromTop (4.0f + 24.0f);
+            auto row2 = in.removeFromTop (22.0f);
+            g.drawText ("Focus", row2.removeFromLeft (40.0f), juce::Justification::centredLeft);
+            const int a = juce::roundToInt (proc.getParams().getRawParameterValue ("focusA")->load());
+            const int b = juce::roundToInt (proc.getParams().getRawParameterValue ("focusB")->load());
+            g.setColour (colours::text);
+            g.drawText (juce::String (ms ? "M " : "L ") + juce::String (a) + juce::String::fromUTF8 (" · ") + (ms ? "S " : "R ") + juce::String (b),
+                        row2, juce::Justification::centredRight);
+        }
 
         const double mk = makeup.getValue();
         value (cards[1], (mk > 0.05 ? "+" : "") + juce::String (mk, 1), "dB");

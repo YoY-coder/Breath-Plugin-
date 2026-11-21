@@ -62,6 +62,39 @@ namespace breath::ui
         void mouseDown (const juce::MouseEvent&) override;
     };
 
+    // Réglage « tilt » façon Soothe : libellé + deux petites cases (bas | haut) réglées en glissant ↕.
+    // Valeurs en « position » -1..1 (au centre = neutre) ; double-clic = neutre ; Shift = réglage fin.
+    class TiltControl : public juce::Component, public juce::SettableTooltipClient
+    {
+    public:
+        TiltControl (const juce::String& text, std::function<juce::String (float)> format) : label (text), fmt (std::move (format)) {}
+
+        std::function<void()> onDragStart, onDragEnd;
+        std::function<void (float lo, float hi)> onChange;
+        void setValues (float lo, float hi) { v[0] = lo; v[1] = hi; repaint(); }
+        float getLow() const noexcept  { return v[0]; }
+        float getHigh() const noexcept { return v[1]; }
+
+        void paint (juce::Graphics&) override;
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseDrag (const juce::MouseEvent&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+        void mouseDoubleClick (const juce::MouseEvent&) override;
+        void mouseMove (const juce::MouseEvent& e) override { const int h = boxAt (e.position); if (h != hover) { hover = h; repaint(); } }
+        void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
+        void enablementChanged() override { repaint(); }
+
+    private:
+        juce::Rectangle<float> box (int i) const;
+        int boxAt (juce::Point<float> p) const;
+
+        juce::String label;
+        std::function<juce::String (float)> fmt;
+        float v[2] { 0.0f, 0.0f };
+        int active = -1, hover = -1;
+        float startV = 0.0f, startY = 0.0f;
+    };
+
     // Interrupteur avec libellé à gauche (non relié à un paramètre).
     class LabelledToggle : public juce::Component, public juce::SettableTooltipClient
     {

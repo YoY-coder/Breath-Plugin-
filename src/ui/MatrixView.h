@@ -68,6 +68,7 @@ namespace breath::ui
         enum class Mode { instance, matrix };
         RelationPanel (BreathAudioProcessor& p, Mode m);
         void refresh();
+        void tick();     // suit l'automation (Quantité)
         void paint (juce::Graphics&) override;
         void resized() override;
 
@@ -76,17 +77,19 @@ namespace breath::ui
         int source() const;
         int target() const;
         void apply();
-        float rowHeight() const { return mode == Mode::instance ? 33.0f : 42.0f; }
+        float rowHeight() const { return mode == Mode::instance ? 31.0f : 42.0f; }
 
         BreathAudioProcessor& proc;
         BreathHub& hub;
         Mode mode;
         juce::ToggleButton enabled;
-        juce::Slider amount, attack, release, resolution, detailLow, detailHigh;
+        juce::Slider amount, attack, release, resolution;
+        TiltControl detailTilt, attackTilt, releaseTilt;
         Segmented hardMode { { "Soft", "Hard" } };
+        std::unique_ptr<ParamSegmented> bands;          // 64 | 128 bandes (vue Instance)
         LabelledToggle masking { "Masking" }, autoThr { "Seuil auto" }, follow { juce::String::fromUTF8 ("Suivre la hiérarchie") };
         std::vector<Row> rows;
-        juce::Rectangle<float> knobsArea;
+        juce::Rectangle<float> tiltArea;
         bool editing = false, updating = false;
     };
 

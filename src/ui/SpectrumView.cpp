@@ -69,13 +69,16 @@ namespace breath::ui
     float SpectrumView::redDbToY (float db) const
     {
         auto a = graphArea();
-        return a.getY() + 4.0f + db / redScale * a.getHeight() * 0.45f;
+        // Soft : l'échelle (15 dB) occupe le haut du graphe ; Hard : 72 dB descendent jusqu'en bas.
+        const float frac = 0.45f + 0.55f * juce::jlimit (0.0f, 1.0f, (redScale - kRedScaleSoft) / (kRedScaleHard - kRedScaleSoft));
+        return a.getY() + 4.0f + db / redScale * (a.getHeight() - 8.0f) * frac;
     }
 
     float SpectrumView::yToRedDb (float y) const
     {
         auto a = graphArea();
-        return (y - a.getY() - 4.0f) / (a.getHeight() * 0.45f) * redScale;
+        const float frac = 0.45f + 0.55f * juce::jlimit (0.0f, 1.0f, (redScale - kRedScaleSoft) / (kRedScaleHard - kRedScaleSoft));
+        return (y - a.getY() - 4.0f) / ((a.getHeight() - 8.0f) * frac) * redScale;
     }
 
     //==========================================================================
@@ -181,8 +184,8 @@ namespace breath::ui
 
     juce::Point<float> SpectrumView::kneeHandlePos (const RelationSettings& rel, int src) const
     {
-        // Poignée du knee : près du bord gauche de la zone, sur le bord haut de la bande du knee.
-        const float x = juce::jmin (freqToX (rel.lowHz) + 22.0f, (freqToX (rel.lowHz) + freqToX (rel.highHz)) * 0.5f - 16.0f);
+        // Poignée du knee : près du bord droit de la zone (côté de l'étiquette du seuil), sur le haut de la bande du knee.
+        const float x = juce::jmax (freqToX (rel.highHz) - 22.0f, (freqToX (rel.lowHz) + freqToX (rel.highHz)) * 0.5f + 16.0f);
         return { x, specDbToY (thresholdAt (rel, src, x) + 0.5f * rel.knee) - 8.0f };
     }
 
@@ -423,7 +426,8 @@ namespace breath::ui
                 const auto label = rel.autoThreshold
                     ? juce::String::fromUTF8 ("seuil auto ") + (rel.autoOffset >= 0.0f ? "+" : "") + juce::String (rel.autoOffset, 1) + " dB"
                     : juce::String::fromUTF8 ("seuil ") + juce::String (juce::roundToInt (rel.threshold)) + " dB";
-                drawPill (g, { roomRight ? x1 + 8.0f : x0 - 8.0f, specDbToY (thresholdAt (rel, sel, roomRight ? x1 : x0)) }, label, c, roomRight ? 1 : -1);
+                // Étiquette du seuil à droite de la zone (ou juste à l'intérieur s'il n'y a pas la place).
+                drawPill (g, { roomRight ? x1 + 8.0f : x1 - 8.0f, specDbToY (thresholdAt (rel, sel, x1)) }, label, c, roomRight ? 1 : -1);
             }
 
             // Courbe de réduction max (façonnable par points)
@@ -447,8 +451,10 @@ namespace breath::ui
                 g.fillEllipse (hx - 6.5f, baseY - 6.5f, 13.0f, 13.0f);
                 g.setColour (colours::accent);
                 g.drawEllipse (hx - 6.5f, baseY - 6.5f, 13.0f, 13.0f, 2.0f);
-                drawPill (g, { roomRight ? x1 + 8.0f : x0 - 8.0f, redDbToY (rel.maxAt (rel.highHz)) },
-                          juce::String::fromUTF8 ("max −") + juce::String (rel.maxReduction, 1) + " dB", colours::accent, roomRight ? 1 : -1);
+                // Étiquette du max à gauche de la zone (ou juste à l'intérieur s'il n'y a pas la place).
+                const bool roomLeft = x0 - 110.0f > a.getX();
+                drawPill (g, { roomLeft ? x0 - 8.0f : x0 + 8.0f, redDbToY (rel.maxAt (rel.lowHz)) - (roomLeft ? 0.0f : 18.0f) },
+                          juce::String::fromUTF8 ("max −") + juce::String (rel.maxReduction, 1) + " dB", colours::accent, roomLeft ? -1 : 1);
 
                 for (int i = 0; i < rel.numNodes; ++i)
                 {
@@ -473,7 +479,7 @@ namespace breath::ui
             {
             g.setFont (font (10.0f));
             g.setColour (colours::text3);
-            g.drawText (juce::String::fromUTF8 ("Bords : ↔ fréquence, ↕ pente · courbes bleue (max) et pointillée (seuil) : double-clic = point, molette = largeur · poignée ≡ = knee"),
+            g.drawText (juce::String::fromUTF8 ("Bords : ↔ fréquence, ↕ pente · courbes max et seuil : double-clic = point, Ctrl+glisser ou molette = largeur · ≡ = knee · Shift = fin"),
                         juce::Rectangle<float> (a.getX() + 12.0f, a.getBottom() - 40.0f, a.getWidth() - 24.0f, 14.0f),
                         juce::Justification::centredLeft);
             }
@@ -481,6 +487,7 @@ namespace breath::ui
 
         // Pastilles : piste courante + sources
         chipAreas.clear();
+        chipCloseAreas.clear();
         addChipArea = {};
         {
             float x = 18.0f;
@@ -524,7 +531,17 @@ namespace breath::ui
                 g.setFont (font (12.0f, Weight::medium));
                 g.drawText (on ? nm : nm + " (off)", r.withTrimmedLeft (23.0f), juce::Justification::centredLeft);
                 chipAreas.push_back ({ r, u });
-                x += w + 6.0f;
+
+                // Petite croix en haut à droite : retirer l'affectation.
+                const auto cr = juce::Rectangle<float> (14.0f, 14.0f).withCentre ({ r.getRight() - 3.0f, r.getY() + 3.0f });
+                const bool hotX = hover.t == Target::chipClose && hover.slot == u;
+                g.setColour (hotX ? colours::warning : colours::raised);
+                g.fillEllipse (cr);
+                g.setColour (hotX ? juce::Colours::black : colours::text);
+                g.drawLine (cr.getX() + 4.0f, cr.getY() + 4.0f, cr.getRight() - 4.0f, cr.getBottom() - 4.0f, 1.3f);
+                g.drawLine (cr.getRight() - 4.0f, cr.getY() + 4.0f, cr.getX() + 4.0f, cr.getBottom() - 4.0f, 1.3f);
+                chipCloseAreas.push_back ({ cr, u });
+                x += w + 10.0f;
             }
 
             {
@@ -561,6 +578,9 @@ namespace breath::ui
     //==========================================================================
     SpectrumView::Hit SpectrumView::hitTest (juce::Point<float> p) const
     {
+        for (auto& [r, u] : chipCloseAreas)
+            if (r.expanded (2.0f).contains (p))
+                return { Target::chipClose, u, -1 };
         for (auto& [r, u] : chipAreas)
             if (r.contains (p))
                 return { Target::chip, u, -1 };
@@ -619,6 +639,7 @@ namespace breath::ui
             case Target::thrNode:     setMouseCursor (juce::MouseCursor::DraggingHandCursor); break;
             case Target::knee:        setMouseCursor (juce::MouseCursor::UpDownResizeCursor); break;
             case Target::chip:
+            case Target::chipClose:
             case Target::addChip:
             case Target::selectOther: setMouseCursor (juce::MouseCursor::PointingHandCursor); break;
             case Target::none:
@@ -663,14 +684,14 @@ namespace breath::ui
         const auto nm = source == me ? juce::String ("Self") : hub.displayName (source);
         juce::PopupMenu m;
         m.addItem (1, rel.enabled ? juce::String::fromUTF8 ("Bypass de la relation ") + nm : juce::String::fromUTF8 ("Réactiver la relation ") + nm);
-        m.addItem (2, juce::String::fromUTF8 ("Retirer la relation ") + nm);
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [this, source] (int r)
+        juce::Rectangle<float> chip;
+        for (auto& [r, u] : chipAreas) if (u == source) chip = r;
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this)
+                             .withTargetScreenArea (localAreaToGlobal (chip.toNearestInt())), [this, source] (int r)
         {
-            if (! hub.isActive (source)) return;
+            if (! hub.isActive (source) || r != 1) return;
             auto s = hub.getRelation (source, me);
-            if (r == 1) s.enabled = ! s.enabled;
-            else if (r == 2) s.assigned = false;
-            else return;
+            s.enabled = ! s.enabled;
             hub.beginEdit();
             hub.setRelation (source, me, s);
             hub.endEdit();
@@ -683,6 +704,18 @@ namespace breath::ui
 
         if (drag.t == Target::addChip) { drag = {}; showAddMenu(); return; }
 
+        if (drag.t == Target::chipClose)
+        {
+            const int src = drag.slot;
+            drag = {};
+            auto s = hub.getRelation (src, me);
+            s.assigned = false;
+            hub.beginEdit();
+            hub.setRelation (src, me, s);
+            hub.endEdit();
+            return;
+        }
+
         if (drag.t == Target::chip)
         {
             const int s = drag.slot;
@@ -692,7 +725,7 @@ namespace breath::ui
             return;
         }
 
-        if (drag.t == Target::thrNode && e.mods.isPopupMenu())
+        if (drag.t == Target::thrNode && e.mods.isRightButtonDown())
         {
             auto s = hub.getRelation (drag.slot, me);
             const int idx = drag.node;
@@ -709,7 +742,7 @@ namespace breath::ui
             return;
         }
 
-        if (drag.t == Target::node && e.mods.isPopupMenu())
+        if (drag.t == Target::node && e.mods.isRightButtonDown())
         {
             auto s = hub.getRelation (drag.slot, me);
             const int idx = drag.node;
@@ -740,8 +773,11 @@ namespace breath::ui
         if (drag.t == Target::none)
             return;
 
-        // Alt / Option : réglage fin.
-        const float fine = e.mods.isAltDown() ? 0.2f : 1.0f;
+        // Shift : réglage fin (convention FabFilter).
+        const float fine = e.mods.isShiftDown() ? 0.2f : 1.0f;
+        // Ctrl (Cmd sur Mac) + glisser sur un point : largeur (Q).
+        const bool widthDrag = (drag.t == Target::node || drag.t == Target::thrNode)
+                               && (e.mods.isCtrlDown() || e.mods.isCommandDown());
         const auto p = dragOrigin + (e.position - dragOrigin) * fine;
         auto s = dragStart;
 
@@ -778,6 +814,11 @@ namespace breath::ui
             case Target::thrNode:
             {
                 auto& n = s.thrNodes[(size_t) drag.node];
+                if (widthDrag)
+                {
+                    n.width = juce::jlimit (0.1f, 6.0f, dragStart.thrNodes[(size_t) drag.node].width * std::pow (2.0f, (p.y - dragOrigin.y) / 60.0f));
+                    break;
+                }
                 n.freq = juce::jlimit (kMinFreq, kMaxFreq, xToFreq (p.x));
                 const float without = thresholdAt (s, drag.slot, freqToX (n.freq), drag.node);
                 n.gain = juce::jlimit (-40.0f, 40.0f, yToSpecDb (p.y) - without);
@@ -790,11 +831,16 @@ namespace breath::ui
             case Target::node:
             {
                 auto& n = s.nodes[(size_t) drag.node];
+                if (widthDrag)
+                {
+                    n.width = juce::jlimit (0.1f, 6.0f, dragStart.nodes[(size_t) drag.node].width * std::pow (2.0f, (p.y - dragOrigin.y) / 60.0f));
+                    break;
+                }
                 n.freq = juce::jlimit (kMinFreq, kMaxFreq, xToFreq (p.x));
                 n.gain = juce::jlimit (-30.0f, 30.0f, yToRedDb (p.y) - maxWithout (s, drag.node, n.freq));
                 break;
             }
-            case Target::none: case Target::selectOther: case Target::chip: case Target::addChip: default: break;
+            case Target::none: case Target::selectOther: case Target::chip: case Target::chipClose: case Target::addChip: default: break;
         }
         hub.setRelation (drag.slot, me, s);
         repaint();

@@ -56,10 +56,10 @@ namespace breath::ui
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&familyBtn), [this] (int r)
             {
                 if (r <= 0) return;
-                auto* p = proc.getParams().getParameter ("family");
-                p->beginChangeGesture();
-                p->setValueNotifyingHost (p->convertTo0to1 ((float) (r - 1)));
-                p->endChangeGesture();
+                auto* fam = proc.getParams().getParameter ("family");
+                fam->beginChangeGesture();
+                fam->setValueNotifyingHost (fam->convertTo0to1 ((float) (r - 1)));
+                fam->endChangeGesture();
                 hub.setFamily (proc.getSlot(), r - 1);
             });
         };

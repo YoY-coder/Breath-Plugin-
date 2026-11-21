@@ -21,6 +21,8 @@ namespace breath
         virtual bool  getBypassAll() const = 0;
         virtual void  setBypassAllFromHub (bool b) = 0;
         virtual int   getFilterBands() const { return 64; }   // résolution de filtrage (64 ou 128)
+        virtual float getSlotAmount (int /*slot*/) const { return -1.0f; }   // Quantité de l'emplacement d'automation
+        virtual void  setSlotAmountFromHub (int /*slot*/, float /*v*/) {}
     };
 
     //==========================================================================
@@ -137,7 +139,12 @@ namespace breath
         // Restauration depuis l'état sauvegardé : gère la duplication (identifiant déjà pris).
         void restoreIdentity (int slotIndex, juce::Uuid& id, int& seq, const juce::String& manualName);
 
-        void setDawTrackInfo (int slotIndex, const juce::String& name, std::optional<juce::Colour> colour);
+        void setDawTrackInfo (int slotIndex, std::optional<juce::String> name, std::optional<juce::Colour> colour);
+
+        // Emplacements d'automation (par piste creusée) : 0 = Self, 1..8 = sources.
+        juce::String slotSourceName (int target, int slot) const;
+        void syncSlotAmounts (int target);   // recopie les Quantités du modèle dans les paramètres
+        float relationAmount (int source, int target) const;   // Quantité effective (automation comprise)
         void setManualName (int slotIndex, const juce::String& name);
 
         bool isActive (int s) const noexcept { return s >= 0 && s < kMaxInstances && slots[(size_t) s].active.load(); }
@@ -203,6 +210,7 @@ namespace breath
         Key keyFor (int upper, int lower) const { return { infos[(size_t) upper].id.toString(), infos[(size_t) lower].id.toString() }; }
 
         void pushRelationsToAudio();
+        void ensureSlots();
         void updateMasterSlot();
         void modelChanged (bool storeSnapshot = true);
         void refresh();

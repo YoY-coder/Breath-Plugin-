@@ -19,6 +19,8 @@ namespace breath
 
         // reductionDb : réduction souhaitée pour chacune des getNumBands() bandes (dB positifs).
         void setReductions (const float* reductionDb) noexcept;
+        // Réductions distinctes pour les deux voies (gauche/droite ou mid/side).
+        void setReductions (const float* reductionA, const float* reductionB) noexcept;
 
         // Une seule passe par échantillon : lissage du gain de chaque cloche (double lissage,
         // trajectoire sans cassure) puis filtrage. Cloche à variable d'état (« trapézoïdale ») :
@@ -32,9 +34,10 @@ namespace breath
             {
                 const auto b = (size_t) activeList[(size_t) i];
                 const auto& c = fixed[b];
-                m1Mid[b] += (m1Goal[b] - m1Mid[b]) * smoothK;
-                m1[b]    += (m1Mid[b] - m1[b]) * smoothK;
-                const float g = m1[b];
+                m1Mid[0][b] += (m1Goal[0][b] - m1Mid[0][b]) * smoothK;
+                m1[0][b]    += (m1Mid[0][b] - m1[0][b]) * smoothK;
+                m1Mid[1][b] += (m1Goal[1][b] - m1Mid[1][b]) * smoothK;
+                m1[1][b]    += (m1Mid[1][b] - m1[1][b]) * smoothK;
 
                 auto& s0 = sl[b];
                 const float v3l = xl - s0.ic2;
@@ -42,7 +45,7 @@ namespace breath
                 const float v2l = s0.ic2 + c.a2 * s0.ic1 + c.a3 * v3l;
                 s0.ic1 = 2.0f * v1l - s0.ic1;
                 s0.ic2 = 2.0f * v2l - s0.ic2;
-                xl += g * v1l;
+                xl += m1[0][b] * v1l;
 
                 auto& s1 = sr[b];
                 const float v3r = xr - s1.ic2;
@@ -50,7 +53,7 @@ namespace breath
                 const float v2r = s1.ic2 + c.a2 * s1.ic1 + c.a3 * v3r;
                 s1.ic1 = 2.0f * v1r - s1.ic1;
                 s1.ic2 = 2.0f * v2r - s1.ic2;
-                xr += g * v1r;
+                xr += m1[1][b] * v1r;
             }
             l = xl;
             r = xr;
@@ -63,15 +66,15 @@ namespace breath
             {
                 const auto b = (size_t) activeList[(size_t) i];
                 const auto& c = fixed[b];
-                m1Mid[b] += (m1Goal[b] - m1Mid[b]) * smoothK;
-                m1[b]    += (m1Mid[b] - m1[b]) * smoothK;
+                m1Mid[0][b] += (m1Goal[0][b] - m1Mid[0][b]) * smoothK;
+                m1[0][b]    += (m1Mid[0][b] - m1[0][b]) * smoothK;
                 auto& s0 = st[b];
                 const float v3 = x - s0.ic2;
                 const float v1 = c.a1 * s0.ic1 + c.a2 * v3;
                 const float v2 = s0.ic2 + c.a2 * s0.ic1 + c.a3 * v3;
                 s0.ic1 = 2.0f * v1 - s0.ic1;
                 s0.ic2 = 2.0f * v2 - s0.ic2;
-                x += m1[b] * v1;
+                x += m1[0][b] * v1;
             }
             return x;
         }
@@ -83,7 +86,9 @@ namespace breath
         float m1For (int band, float reductionDb) const noexcept;
 
         std::array<Coeffs, kNumBands> fixed {};
-        std::array<float, kNumBands> m1 {}, m1Mid {}, m1Goal {}, kDamp {};
+        std::array<std::array<float, kNumBands>, kMaxChannels> m1 {}, m1Mid {}, m1Goal {};
+        std::array<float, kNumBands> kDamp {};
+        void solveGains (const float* target, float* g) const noexcept;
         float smoothK = 0.02f;
         std::array<std::array<State, kNumBands>, kMaxChannels> state {};
         std::array<float, kNumBands> gTan {}, cosw {}, alpha {};

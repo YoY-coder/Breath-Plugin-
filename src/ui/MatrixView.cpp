@@ -411,7 +411,24 @@ namespace breath::ui
     }
 
     //==========================================================================
-    RelationPanel::RelationPanel (BreathAudioProcessor& p, Mode m) : proc (p), hub (p.getHub()), mode (m)
+    namespace
+    {
+        juce::String fmtMult (float pos)
+        {
+            const float m = std::pow (10.0f, pos);
+            return juce::String::fromUTF8 ("×") + juce::String (m, m < 1.0f ? 2 : 1);
+        }
+        juce::String fmtDetail (float pos)
+        {
+            return (pos > 0.005f ? "+" : "") + juce::String (juce::roundToInt (pos * 100.0f)) + " %";
+        }
+    }
+
+    RelationPanel::RelationPanel (BreathAudioProcessor& p, Mode m)
+        : proc (p), hub (p.getHub()), mode (m),
+          detailTilt (juce::String::fromUTF8 ("Détail"), fmtDetail),
+          attackTilt ("Attaque", fmtMult),
+          releaseTilt ("Release", fmtMult)
     {
         enabled.setTooltip (juce::String::fromUTF8 ("Bypass de cette relation (elle reste en place, grisée)."));
         enabled.onClick = [this]
@@ -458,13 +475,33 @@ namespace breath::ui
 
         const RelationSettings d;
         setup (amount, 0.0, 1.0, d.amount);
-        setup (attack, 0.1, 100.0, d.attackMs, 5.0);
+        setup (attack, 0.1, 300.0, d.attackMs, 5.0);
         setup (release, 5.0, 1000.0, d.releaseMs, 120.0);
         setup (resolution, 0.0, 1.0, d.resolution);
-        setup (detailLow, -1.0, 1.0, 0.0, 0.0, true);
-        setup (detailHigh, -1.0, 1.0, 0.0, 0.0, true);
-        detailLow.setTooltip (juce::String::fromUTF8 ("Détail low : affine (droite) ou élargit (gauche) la résolution dans le bas du spectre."));
-        detailHigh.setTooltip (juce::String::fromUTF8 ("Détail high : affine (droite) ou élargit (gauche) la résolution dans le haut du spectre."));
+        detailTilt.setTooltip (juce::String::fromUTF8 ("Détail bas | haut : résolution plus fine (vers le haut) ou plus large (vers le bas) "
+                                                       "dans le bas et dans le haut du spectre."));
+        attackTilt.setTooltip (juce::String::fromUTF8 ("Tilt d'attaque : multiplie l'attaque dans le bas | le haut du spectre (×0,1 à ×10)."));
+        releaseTilt.setTooltip (juce::String::fromUTF8 ("Tilt de release : multiplie le release dans le bas | le haut du spectre (×0,1 à ×10)."));
+        for (auto* t : { &detailTilt, &attackTilt, &releaseTilt })
+        {
+            t->onDragStart = [this] { editing = true; hub.beginEdit(); };
+            t->onDragEnd   = [this] { editing = false; hub.endEdit(); };
+            t->onChange    = [this] (float, float) { if (! updating) apply(); };
+            addAndMakeVisible (*t);
+        }
+
+        // Shift + glisser = réglage fin (convention FabFilter).
+        for (auto* sl : { &amount, &attack, &release, &resolution })
+            sl->setVelocityModeParameters (0.25, 1, 0.0, true, juce::ModifierKeys::shiftModifier);
+
+        if (mode == Mode::instance)
+        {
+            bands = std::make_unique<ParamSegmented> (*p.getParams().getParameter ("bands"), juce::StringArray { "64", "128" });
+            bands->fontSize = 11.0f;
+            bands->setTooltip (juce::String::fromUTF8 ("Résolution maximale du filtrage de cette piste : 64 ou 128 bandes "
+                                                       "(128 = plus fin dans les médiums et les aigus, un peu plus de processeur)."));
+            addAndMakeVisible (*bands);
+        }
 
         rows = {
             { juce::String::fromUTF8 ("Quantité"),   &amount,     [this] { return juce::String (juce::roundToInt (amount.getValue() * 100)) + " %"; } },
@@ -503,8 +540,12 @@ namespace breath::ui
         s.attackMs = (float) attack.getValue();
         s.releaseMs = (float) release.getValue();
         s.resolution = (float) resolution.getValue();
-        s.detailLow = (float) detailLow.getValue();
-        s.detailHigh = (float) detailHigh.getValue();
+        s.detailLow = detailTilt.getLow();
+        s.detailHigh = detailTilt.getHigh();
+        s.attackTiltLow = std::pow (10.0f, attackTilt.getLow());
+        s.attackTiltHigh = std::pow (10.0f, attackTilt.getHigh());
+        s.releaseTiltLow = std::pow (10.0f, releaseTilt.getLow());
+        s.releaseTiltHigh = std::pow (10.0f, releaseTilt.getHigh());
         hub.setRelation (u, l, s);
         repaint();
     }
@@ -517,7 +558,7 @@ namespace breath::ui
         const bool ok = hub.isActive (u) && hub.isActive (l) && (mode == Mode::matrix || hub.isRelationVisible (u, l));
 
         for (auto* c : std::initializer_list<juce::Component*> { &enabled, &follow, &masking, &autoThr, &hardMode,
-                                                                 &amount, &attack, &release, &resolution, &detailLow, &detailHigh })
+                                                                 &amount, &attack, &release, &resolution, &detailTilt, &attackTilt, &releaseTilt })
             c->setVisible (ok);
 
         if (ok && ! editing)
@@ -537,16 +578,34 @@ namespace breath::ui
             autoThr.setEnabled (on);
             hardMode.setSelected (s.hard ? 1 : 0);
             hardMode.setEnabled (on);
-            amount.setValue (s.amount, juce::dontSendNotification);
+            amount.setValue (hub.relationAmount (u, l), juce::dontSendNotification);
             attack.setValue (s.attackMs, juce::dontSendNotification);
             release.setValue (s.releaseMs, juce::dontSendNotification);
             resolution.setValue (s.resolution, juce::dontSendNotification);
-            detailLow.setValue (s.detailLow, juce::dontSendNotification);
-            detailHigh.setValue (s.detailHigh, juce::dontSendNotification);
-            for (auto* sl : { &amount, &attack, &release, &resolution, &detailLow, &detailHigh })
+            detailTilt.setValues (s.detailLow, s.detailHigh);
+            attackTilt.setValues (std::log10 (juce::jlimit (0.1f, 10.0f, s.attackTiltLow)), std::log10 (juce::jlimit (0.1f, 10.0f, s.attackTiltHigh)));
+            releaseTilt.setValues (std::log10 (juce::jlimit (0.1f, 10.0f, s.releaseTiltLow)), std::log10 (juce::jlimit (0.1f, 10.0f, s.releaseTiltHigh)));
+            for (auto* sl : { &amount, &attack, &release, &resolution })
                 sl->setEnabled (on);
+            for (auto* t : { &detailTilt, &attackTilt, &releaseTilt })
+                t->setEnabled (on);
         }
         repaint();
+    }
+
+    void RelationPanel::tick()
+    {
+        // Automation de la Quantité : le curseur suit le paramètre du DAW.
+        const int u = source(), l = target();
+        if (editing || amount.isMouseButtonDown() || ! hub.isActive (u) || ! hub.isActive (l))
+            return;
+        const float v = hub.relationAmount (u, l);
+        if (std::abs ((float) amount.getValue() - v) > 1.0e-4f)
+        {
+            const juce::ScopedValueSetter<bool> svs (updating, true);
+            amount.setValue (v, juce::dontSendNotification);
+            repaint();
+        }
     }
 
     void RelationPanel::resized()
@@ -556,18 +615,29 @@ namespace breath::ui
         const float rh = rowHeight();
         for (auto& r : rows)
         {
-            r.slider->setBounds (juce::Rectangle<float> (16.0f, y + 16.0f, (float) getWidth() - 32.0f, 16.0f).toNearestInt().expanded (4, 0));
+            r.slider->setBounds (juce::Rectangle<float> (16.0f, y + 15.0f, (float) getWidth() - 32.0f, 16.0f).toNearestInt().expanded (4, 0));
             y += rh;
         }
-        // Potards Détail low / high
-        knobsArea = { 8.0f, y, (float) getWidth() - 16.0f, 64.0f };
-        const float half = knobsArea.getWidth() / 2.0f;
-        detailLow.setBounds (juce::Rectangle<float> (knobsArea.getX(), knobsArea.getY(), half, 44.0f).withSizeKeepingCentre (42.0f, 42.0f).toNearestInt());
-        detailHigh.setBounds (juce::Rectangle<float> (knobsArea.getX() + half, knobsArea.getY(), half, 44.0f).withSizeKeepingCentre (42.0f, 42.0f).toNearestInt());
-        y += 68.0f;
 
+        // Tilt : Détail, Attaque, Release (cases bas | haut)
+        y += 10.0f;                                    // place pour les libellés « bas | haut »
         const float w = (float) getWidth() - 32.0f;
-        hardMode.setBounds (juce::Rectangle<float> (16.0f, y, w, 24.0f).toNearestInt());
+        const float th = mode == Mode::instance ? 24.0f : 30.0f;
+        tiltArea = { 8.0f, y - 2.0f, (float) getWidth() - 16.0f, 3.0f * th + 4.0f };
+        detailTilt.setBounds (juce::Rectangle<float> (16.0f, y, w, th - 2.0f).toNearestInt());
+        attackTilt.setBounds (juce::Rectangle<float> (16.0f, y + th, w, th - 2.0f).toNearestInt());
+        releaseTilt.setBounds (juce::Rectangle<float> (16.0f, y + 2.0f * th, w, th - 2.0f).toNearestInt());
+        y += 3.0f * th + 8.0f;
+
+        if (bands != nullptr)
+        {
+            hardMode.setBounds (juce::Rectangle<float> (16.0f, y, w * 0.55f - 4.0f, 24.0f).toNearestInt());
+            bands->setBounds (juce::Rectangle<float> (16.0f + w * 0.55f + 4.0f, y, w * 0.45f - 4.0f, 24.0f).toNearestInt());
+        }
+        else
+        {
+            hardMode.setBounds (juce::Rectangle<float> (16.0f, y, w, 24.0f).toNearestInt());
+        }
         y += 30.0f;
         masking.setBounds (juce::Rectangle<float> (16.0f, y, w / 2.0f - 6.0f, 24.0f).toNearestInt());
         autoThr.setBounds (juce::Rectangle<float> (16.0f + w / 2.0f + 6.0f, y, w / 2.0f - 6.0f, 24.0f).toNearestInt());
@@ -638,21 +708,16 @@ namespace breath::ui
             y += rh;
         }
 
-        // Libellés des potards
+        // Section tilt (cases bas | haut)
         g.setColour (colours::line);
-        g.fillRect (8.0f, knobsArea.getY() - 4.0f, (float) getWidth() - 16.0f, 1.0f);
-        const float half = knobsArea.getWidth() / 2.0f;
-        auto knobLabel = [&] (float x0, const juce::String& t, double v)
-        {
-            g.setFont (font (10.0f, Weight::medium));
-            g.setColour (en ? colours::text2 : colours::text3);
-            const juce::String val = (v > 0.005 ? "+" : "") + juce::String (juce::roundToInt (v * 100.0)) + " %";
-            g.drawText (t + "  " + val, juce::Rectangle<float> (x0, knobsArea.getY() + 46.0f, half, 14.0f), juce::Justification::centred);
-        };
-        knobLabel (knobsArea.getX(), juce::String::fromUTF8 ("Détail low"), detailLow.getValue());
-        knobLabel (knobsArea.getX() + half, juce::String::fromUTF8 ("Détail high"), detailHigh.getValue());
+        g.fillRect (8.0f, tiltArea.getY() - 13.0f, (float) getWidth() - 16.0f, 1.0f);
+        g.setFont (font (9.0f, Weight::medium));
+        g.setColour (colours::text3);
+        const float bx = (float) getWidth() - 16.0f - 84.0f;
+        g.drawText ("bas", juce::Rectangle<float> (bx, tiltArea.getY() - 10.0f, 40.0f, 10.0f), juce::Justification::centred);
+        g.drawText ("haut", juce::Rectangle<float> (bx + 44.0f, tiltArea.getY() - 10.0f, 40.0f, 10.0f), juce::Justification::centred);
         g.setColour (colours::line);
-        g.fillRect (8.0f, knobsArea.getBottom() + 1.0f, (float) getWidth() - 16.0f, 1.0f);
+        g.fillRect (8.0f, tiltArea.getBottom() + 2.0f, (float) getWidth() - 16.0f, 1.0f);
     }
 
     //==========================================================================

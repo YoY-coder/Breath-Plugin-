@@ -32,6 +32,11 @@ namespace breath
             t.setProperty ("autoOffset", r.autoOffset, nullptr);
             t.setProperty ("detailLow", r.detailLow, nullptr);
             t.setProperty ("detailHigh", r.detailHigh, nullptr);
+            t.setProperty ("atkTiltLo", r.attackTiltLow, nullptr);
+            t.setProperty ("atkTiltHi", r.attackTiltHigh, nullptr);
+            t.setProperty ("relTiltLo", r.releaseTiltLow, nullptr);
+            t.setProperty ("relTiltHi", r.releaseTiltHigh, nullptr);
+            t.setProperty ("slot", r.slot, nullptr);
             t.setProperty ("lowSlope", r.lowSlope, nullptr);
             t.setProperty ("highSlope", r.highSlope, nullptr);
             t.setProperty ("knee", r.knee, nullptr);
@@ -76,6 +81,11 @@ namespace breath
             r.autoOffset   = t.getProperty ("autoOffset", r.autoOffset);
             r.detailLow    = t.getProperty ("detailLow", r.detailLow);
             r.detailHigh   = t.getProperty ("detailHigh", r.detailHigh);
+            r.attackTiltLow   = t.getProperty ("atkTiltLo", r.attackTiltLow);
+            r.attackTiltHigh  = t.getProperty ("atkTiltHi", r.attackTiltHigh);
+            r.releaseTiltLow  = t.getProperty ("relTiltLo", r.releaseTiltLow);
+            r.releaseTiltHigh = t.getProperty ("relTiltHi", r.releaseTiltHigh);
+            r.slot         = t.getProperty ("slot", r.slot);
             r.lowSlope     = t.getProperty ("lowSlope", r.lowSlope);
             r.highSlope    = t.getProperty ("highSlope", r.highSlope);
             r.knee = t.getProperty ("knee", r.knee);
@@ -211,13 +221,96 @@ namespace breath
         refresh();
     }
 
-    void BreathHub::setDawTrackInfo (int s, const juce::String& name, std::optional<juce::Colour> colour)
+    void BreathHub::setDawTrackInfo (int s, std::optional<juce::String> name, std::optional<juce::Colour> colour)
     {
         if (! isActive (s))
             return;
-        infos[(size_t) s].dawName = name;
-        infos[(size_t) s].dawColour = colour;
+        // On ne remplace que ce que l'hôte a fourni.
+        if (name.has_value())   infos[(size_t) s].dawName = *name;
+        if (colour.has_value()) infos[(size_t) s].dawColour = colour;
         sendChangeMessage();
+    }
+
+    //==========================================================================
+    void BreathHub::ensureSlots()
+    {
+        for (int l = 0; l < kMaxInstances; ++l)
+        {
+            if (! slots[(size_t) l].active.load())
+                continue;
+            const auto lid = infos[(size_t) l].id.toString();
+            std::array<bool, kNumSlots> used {};
+
+            for (auto& [k, r] : relationModel)
+            {
+                if (k.second != lid) continue;
+                if (! r.assigned) { r.slot = -1; continue; }
+                if (k.first == lid && r.slot != 0)                     // Self : emplacement 0
+                {
+                    r.slot = 0;
+                    if (infos[(size_t) l].client != nullptr)
+                        infos[(size_t) l].client->setSlotAmountFromHub (0, r.amount);
+                }
+                if (r.slot >= 0 && r.slot < kNumSlots) used[(size_t) r.slot] = true;
+            }
+
+            for (int u = 0; u < kMaxInstances; ++u)
+            {
+                if (u == l || ! slots[(size_t) u].active.load() || ! isRelationVisible (u, l))
+                    continue;
+                auto& r = relationModel[keyFor (u, l)];
+                if (relationModel.count (keyFor (u, l)) && r.slot >= 1)
+                    continue;
+                for (int k = 1; k < kNumSlots; ++k)
+                    if (! used[(size_t) k])
+                    {
+                        used[(size_t) k] = true;
+                        r.slot = k;
+                        if (infos[(size_t) l].client != nullptr)
+                            infos[(size_t) l].client->setSlotAmountFromHub (k, r.amount);
+                        break;
+                    }
+            }
+        }
+    }
+
+    juce::String BreathHub::slotSourceName (int target, int slot) const
+    {
+        if (slot == 0)
+            return "Self";
+        if (isActive (target))
+        {
+            const auto lid = infos[(size_t) target].id.toString();
+            for (auto& [k, r] : relationModel)
+                if (k.second == lid && r.assigned && r.slot == slot)
+                {
+                    const int src = slotForId (k.first);
+                    if (src >= 0) return displayName (src);
+                }
+        }
+        return "Source " + juce::String (slot);
+    }
+
+    void BreathHub::syncSlotAmounts (int target)
+    {
+        if (! isActive (target) || infos[(size_t) target].client == nullptr)
+            return;
+        ensureSlots();
+        const auto lid = infos[(size_t) target].id.toString();
+        for (auto& [k, r] : relationModel)
+            if (k.second == lid && r.slot >= 0)
+                infos[(size_t) target].client->setSlotAmountFromHub (r.slot, r.amount);
+    }
+
+    float BreathHub::relationAmount (int source, int target) const
+    {
+        const auto r = getRelation (source, target);
+        if (r.slot >= 0 && isActive (target) && infos[(size_t) target].client != nullptr)
+        {
+            const float v = infos[(size_t) target].client->getSlotAmount (r.slot);
+            if (v >= 0.0f) return v;
+        }
+        return r.amount;
     }
 
     void BreathHub::setManualName (int s, const juce::String& name)
@@ -353,8 +446,15 @@ namespace breath
     {
         if (! isActive (upper) || ! isActive (lower))
             return;
-        relationModel[keyFor (upper, lower)] = s;
-        relations[(size_t) upper][(size_t) lower].store (s);
+        auto& stored = relationModel[keyFor (upper, lower)];
+        auto next = s;
+        if (next.slot < 0) next.slot = stored.slot;          // l'emplacement d'automation reste attaché à la relation
+        const bool amountChanged = std::abs (stored.amount - next.amount) > 1.0e-6f;
+        stored = next;
+        relations[(size_t) upper][(size_t) lower].store (next);
+        // La Quantité vit dans le paramètre automatisable de la piste creusée : on la recopie.
+        if (amountChanged && next.slot >= 0 && infos[(size_t) lower].client != nullptr)
+            infos[(size_t) lower].client->setSlotAmountFromHub (next.slot, next.amount);
         modelChanged (editDepth == 0);
     }
 
@@ -390,6 +490,7 @@ namespace breath
 
     void BreathHub::pushRelationsToAudio()
     {
+        ensureSlots();
         for (int u = 0; u < kMaxInstances; ++u)
             for (int l = 0; l < kMaxInstances; ++l)
                 if (slots[(size_t) u].active.load() && slots[(size_t) l].active.load())
