@@ -56,5 +56,5 @@ Liste tenue à jour au fil des retours. Rien de ce qui est ici n'est encore cod�
 ## Retours du 22/11
 - [x] (V0.4) Nouveau plugin **Breath One** (l'ancien Breath figé en V0.3).
 - [x] (V0.4) Résolution : plus de plateau quand rien ne dépasse le seuil (étalement « par maximum »).
-- [x] (V0.4) Titre « BREATH ONE » pointillé, fenêtre 15 % plus grande, onglet « Ensemble ».
+- [x] (V0.4) Titre « BREATH ONE » (style logo DROZ Recordz), fenêtre 15 % plus grande, onglet « Ensemble ».
 - [ ] Onglet Ensemble : régler aussi les réglages propres à chaque piste (Dry/Wet, Make-up, Stéréo…).

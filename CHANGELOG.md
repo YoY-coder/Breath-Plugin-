@@ -10,7 +10,7 @@ Quand une version **change le son** à réglages identiques, c'est indiqué par 
 - ⚠️ (par rapport à Breath) **Résolution** : plus de plateau quand rien ne dépasse le seuil ; la réduction s'étale
   seulement autour des endroits qui dépassent.
 - Onglet **Ensemble** : toutes les instances en direct, réglables depuis un seul plugin.
-- Titre « BREATH ONE » pointillé, fenêtre 15 % plus grande à l'ouverture.
+- Titre « BREATH ONE » dans le style du logo DROZ Recordz, fenêtre 15 % plus grande à l'ouverture.
 
 ## V0.3
 - Automation : Quantité et seuil global de chaque relation (emplacements Self + 8 sources nommés d'après la source).
