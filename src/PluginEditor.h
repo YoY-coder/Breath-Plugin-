@@ -5,6 +5,8 @@
 #include "ui/TopBar.h"
 #include "ui/InstanceView.h"
 #include "ui/MatrixView.h"
+#include "ui/EnsembleView.h"
+#include "ui/TitleBar.h"
 
 class BreathAudioProcessorEditor final : public juce::AudioProcessorEditor,
                                          private juce::ChangeListener
@@ -19,7 +21,9 @@ public:
     void showView (int v) { setView (v, false); }
 
     static constexpr int designWidth  = 900;
-    static constexpr int designHeight = 560;
+    static constexpr int designHeight = 596;     // bandeau de titre (36) + barre (52) + contenu
+    static constexpr int titleHeight  = 36;
+    static constexpr int defaultWidth = 1035;    // ouverture ≈ 15 % plus grande que le format de base
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -31,9 +35,11 @@ private:
 
     // Tout est dessiné dans un repère fixe 900 × 560, mis à l'échelle (rendu vectoriel net).
     juce::Component content;
+    breath::ui::TitleBar titleBar;
     breath::ui::TopBar topBar;
     breath::ui::InstanceView instanceView;
     breath::ui::MatrixView matrixView;
+    breath::ui::EnsembleView ensembleView;
     juce::TooltipWindow tooltips { this, 700 };
     juce::VBlankAttachment vblank;
     int frame = 0;

@@ -521,8 +521,17 @@ namespace breath::ui
         refresh();
     }
 
-    int RelationPanel::source() const { return mode == Mode::instance ? proc.instUpper : proc.selectedUpper; }
-    int RelationPanel::target() const { return mode == Mode::instance ? proc.getSlot() : proc.selectedLower; }
+    int RelationPanel::source() const
+    {
+        if (mode == Mode::external) return extSource != nullptr ? *extSource : -1;
+        return mode == Mode::instance ? proc.instUpper : proc.selectedUpper;
+    }
+
+    int RelationPanel::target() const
+    {
+        if (mode == Mode::external) return extTarget != nullptr ? *extTarget : -1;
+        return mode == Mode::instance ? proc.getSlot() : proc.selectedLower;
+    }
 
     void RelationPanel::apply()
     {
@@ -622,7 +631,7 @@ namespace breath::ui
         // Tilt : Détail, Attaque, Release (cases bas | haut)
         y += 10.0f;                                    // place pour les libellés « bas | haut »
         const float w = (float) getWidth() - 32.0f;
-        const float th = mode == Mode::instance ? 24.0f : 30.0f;
+        const float th = mode == Mode::matrix ? 30.0f : 24.0f;
         tiltArea = { 8.0f, y - 2.0f, (float) getWidth() - 16.0f, 3.0f * th + 4.0f };
         detailTilt.setBounds (juce::Rectangle<float> (16.0f, y, w, th - 2.0f).toNearestInt());
         attackTilt.setBounds (juce::Rectangle<float> (16.0f, y + th, w, th - 2.0f).toNearestInt());
@@ -647,7 +656,7 @@ namespace breath::ui
 
     void RelationPanel::paint (juce::Graphics& g)
     {
-        drawCaption (g, mode == Mode::instance ? juce::String::fromUTF8 ("Relation") : juce::String::fromUTF8 ("Relation sélectionnée"),
+        drawCaption (g, mode != Mode::matrix ? juce::String::fromUTF8 ("Relation") : juce::String::fromUTF8 ("Relation sélectionnée"),
                      { 16.0f, 8.0f, 240.0f, 16.0f });
         const int u = source(), l = target();
         const bool ok = hub.isActive (u) && hub.isActive (l) && (mode == Mode::matrix || hub.isRelationVisible (u, l));
@@ -655,7 +664,7 @@ namespace breath::ui
         {
             g.setColour (colours::text3);
             g.setFont (font (12.0f));
-            g.drawFittedText (mode == Mode::instance
+            g.drawFittedText (mode != Mode::matrix
                                   ? juce::String::fromUTF8 ("Aucune piste ne creuse celle-ci. Utilisez « + » au-dessus du spectre pour en ajouter une, "
                                                             "ou « Self » pour que la piste se creuse elle-même (compresseur / anti-résonances).")
                                   : juce::String::fromUTF8 ("Cliquez sur une case de la grille pour régler une relation."),

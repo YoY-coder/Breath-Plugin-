@@ -24,7 +24,7 @@ namespace breath::ui
         BreathHub& hub;
 
         juce::Label name;
-        Segmented views { { "Instance", "Matrice" } };
+        Segmented views { { "Instance", "Matrice", "Ensemble" } };
         IconButton undoBtn { IconButton::Icon::undo }, redoBtn { IconButton::Icon::redo };
         SnapshotButtons snapshots;
         juce::Slider macro;

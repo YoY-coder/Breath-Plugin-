@@ -13,6 +13,9 @@ namespace breath::ui
         explicit SpectrumView (BreathAudioProcessor& p);
 
         std::function<void()> onSelectionChange;
+        // Piste affichée / réglée (par défaut : cette instance). selection = relation sélectionnée (source).
+        void setTarget (int slot, int* selection);
+        int  getTarget() const noexcept { return me; }
         void refresh();    // structure (hiérarchie, relations) modifiée
         void tick();       // ~60 fps
 
@@ -49,6 +52,7 @@ namespace breath::ui
         BreathAudioProcessor& proc;
         BreathHub& hub;
         int me = -1;
+        int* selPtr = nullptr;
 
         std::vector<int> sources;                 // instances qui creusent cette piste (relations actives)
         std::vector<std::pair<juce::Rectangle<float>, int>> chipAreas, chipCloseAreas;

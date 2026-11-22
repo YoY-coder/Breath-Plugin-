@@ -1,4 +1,7 @@
-# Breath
+# Breath One
+
+> **Breath One** succède à **Breath** (figé en V0.3 pour les anciens projets). Les deux peuvent être installés
+> côte à côte ; n'en utilisez qu'un dans un même projet.
 
 Plugin VST3 de **priorisation fréquentielle multi-instance** (Windows + Mac).
 On place Breath sur plusieurs pistes, on définit une hiérarchie (ex. 1. Kick, 2. Basse, 3. Voix…) :
@@ -13,20 +16,20 @@ chaque piste « creuse » les pistes situées en dessous d'elle, uniquement là 
 
 Onglet **Actions** du dépôt → dernière ligne **« Build »** avec une coche verte → section **Artifacts** :
 
-- **Breath-Windows** : dossier `Breath.vst3`
-- **Breath-macOS** : `Breath-mac.zip` (binaire universel Apple Silicon + Intel)
+Le plus simple : onglet **Releases** du dépôt → dernière version → `Breath-One-VX.Y-Windows.zip` ou `-macOS.zip`
+(binaire universel Apple Silicon + Intel). Le plugin s'appelle `Breath One.vst3`.
 
 ## 2. Installer
 
 ### Windows
-1. Dézipper → copier le dossier `Breath.vst3` dans `C:\Program Files\Common Files\VST3\`.
+1. Dézipper → copier le dossier `Breath One.vst3` dans `C:\Program Files\Common Files\VST3\`.
 
 ### Mac
 1. Dézipper jusqu'à obtenir `Breath.vst3`.
-2. Finder → **Cmd + Maj + G** → `~/Library/Audio/Plug-Ins/VST3` → y glisser `Breath.vst3`.
+2. Finder → **Cmd + Maj + G** → `~/Library/Audio/Plug-Ins/VST3` → y glisser `Breath One.vst3`.
 3. Le plugin n'est pas signé par Apple : ouvrir le **Terminal** et coller (une fois par nouvelle version) :
    ```
-   xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Breath.vst3
+   xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Breath One.vst3"
    ```
 
 ### Ableton Live
@@ -62,6 +65,10 @@ Breath apparaît dans *Plug-ins → Breath*. Si vous remplacez une ancienne vers
   résonances (seuls les pics au-dessus du spectre lissé de la piste sont creusés).
 - **En bas** : Dry/Wet, **Make-up** (+ Auto), Lookahead (+ interrupteur **Auto** = calé sur le délai de synchro),
   Stéréo (**L/R ou M/S**, **Link**, **Focus**), Delta, Bypass. En bypass (ou Bypass all), l'affichage se grise.
+
+### Onglet Ensemble
+Toutes les instances de la famille en direct (spectre + réduction). Clic sur une piste = l'ouvrir en grand et régler
+ses relations comme dans la vue Instance ; ‹ › pour passer à la piste précédente / suivante.
 
 ### Vue Matrice (vue d'ensemble)
 - **Hiérarchie** (à gauche) : glissez-déposez pour changer l'ordre. ★ = instance maîtresse (porte la macro

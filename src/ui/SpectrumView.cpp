@@ -40,6 +40,7 @@ namespace breath::ui
     SpectrumView::SpectrumView (BreathAudioProcessor& p) : proc (p), hub (p.getHub())
     {
         me = proc.getSlot();
+        selPtr = &proc.instUpper;
         own.fill (kSilenceDb);
         for (auto& u : upper) u.fill (kSilenceDb);
         refresh();
@@ -81,6 +82,16 @@ namespace breath::ui
         return (y - a.getY() - 4.0f) / ((a.getHeight() - 8.0f) * frac) * redScale;
     }
 
+    void SpectrumView::setTarget (int slot, int* selection)
+    {
+        me = slot;
+        selPtr = selection != nullptr ? selection : &proc.instUpper;
+        own.fill (kSilenceDb);
+        reduction.fill (0.0f);
+        for (auto& u : upper) u.fill (kSilenceDb);
+        refresh();
+    }
+
     //==========================================================================
     void SpectrumView::refresh()
     {
@@ -94,7 +105,7 @@ namespace breath::ui
             if (s != me && hub.isRelationVisible (s, me))
                 sources.push_back (s);
 
-        auto& sel = proc.instUpper;
+        auto& sel = (*selPtr);
         if (std::find (sources.begin(), sources.end(), sel) == sources.end())
             sel = sources.empty() ? -1 : sources.front();
         repaint();
@@ -102,7 +113,7 @@ namespace breath::ui
 
     void SpectrumView::select (int source)
     {
-        proc.instUpper = source;
+        (*selPtr) = source;
         repaint();
         if (onSelectionChange) onSelectionChange();
     }
@@ -129,7 +140,7 @@ namespace breath::ui
         upper[(size_t) me] = own;
 
         // Échelle de réduction : étendue en mode Hard.
-        const float wantScale = (proc.instUpper >= 0 && hub.getRelation (proc.instUpper, me).hard) ? kRedScaleHard : kRedScaleSoft;
+        const float wantScale = ((*selPtr) >= 0 && hub.getRelation ((*selPtr), me).hard) ? kRedScaleHard : kRedScaleSoft;
         redScale += (wantScale - redScale) * 0.25f;
 
         auto& curve = hub.slot (me).reductionCurve;
@@ -233,7 +244,7 @@ namespace breath::ui
                         juce::Rectangle<float> (x - 20.0f, a.getBottom() + 6.0f, 40.0f, 16.0f), juce::Justification::centred);
         }
 
-        const int sel = proc.instUpper;
+        const int sel = (*selPtr);
 
         // Zones des relations (bords en fondu selon la pente réglée)
         for (int u : sources)
@@ -588,7 +599,7 @@ namespace breath::ui
             return { Target::addChip, -1, -1 };
 
         const auto a = graphArea();
-        const int sel = proc.instUpper;
+        const int sel = (*selPtr);
 
         if (sel >= 0 && me >= 0)
         {
@@ -737,7 +748,7 @@ namespace breath::ui
                 if (r != 1 || idx >= s.numThrNodes) return;
                 for (int i = idx; i < s.numThrNodes - 1; ++i) s.thrNodes[(size_t) i] = s.thrNodes[(size_t) i + 1];
                 --s.numThrNodes;
-                hub.beginEdit(); hub.setRelation (proc.instUpper, me, s); hub.endEdit();
+                hub.beginEdit(); hub.setRelation ((*selPtr), me, s); hub.endEdit();
             });
             return;
         }
@@ -754,7 +765,7 @@ namespace breath::ui
                 if (r != 1 || idx >= s.numNodes) return;
                 for (int i = idx; i < s.numNodes - 1; ++i) s.nodes[(size_t) i] = s.nodes[(size_t) i + 1];
                 --s.numNodes;
-                hub.beginEdit(); hub.setRelation (proc.instUpper, me, s); hub.endEdit();
+                hub.beginEdit(); hub.setRelation ((*selPtr), me, s); hub.endEdit();
             });
             return;
         }
@@ -869,7 +880,7 @@ namespace breath::ui
     void SpectrumView::mouseDoubleClick (const juce::MouseEvent& e)
     {
         const auto h = hitTest (e.position);
-        const int sel = proc.instUpper;
+        const int sel = (*selPtr);
         if (sel < 0)
             return;
 

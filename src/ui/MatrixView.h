@@ -65,10 +65,12 @@ namespace breath::ui
     class RelationPanel : public juce::Component
     {
     public:
-        enum class Mode { instance, matrix };
+        enum class Mode { instance, matrix, external };
         RelationPanel (BreathAudioProcessor& p, Mode m);
         void refresh();
         void tick();     // suit l'automation (Quantité)
+        // Mode « external » : piste creusée et source désignées de l'extérieur (onglet Ensemble).
+        void setExternal (int* targetSlot, int* sourceSlot) { extTarget = targetSlot; extSource = sourceSlot; refresh(); }
         void paint (juce::Graphics&) override;
         void resized() override;
 
@@ -77,7 +79,9 @@ namespace breath::ui
         int source() const;
         int target() const;
         void apply();
-        float rowHeight() const { return mode == Mode::instance ? 31.0f : 42.0f; }
+        float rowHeight() const { return mode == Mode::matrix ? 42.0f : 31.0f; }
+        int* extTarget = nullptr;
+        int* extSource = nullptr;
 
         BreathAudioProcessor& proc;
         BreathHub& hub;

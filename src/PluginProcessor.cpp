@@ -586,7 +586,6 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
 
         // Réduction instantanée par bande (plage avec bords en fondu selon la pente).
         std::array<float, kNumBands> inst {}, mask {};
-        double rangePower = 0.0, maskSum = 0.0;
         const float loOct = std::log2 (juce::jmin (rel.lowHz, rel.highHz)), hiOct = std::log2 (juce::jmax (rel.lowHz, rel.highHz));
         const float invLo = 1.0f / juce::jmax (0.02f, rel.lowSlope), invHi = 1.0f / juce::jmax (0.02f, rel.highSlope);
         const float amount = rel.amount * (rel.hard ? 4.0f : 1.0f);
@@ -616,12 +615,14 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             // Masking : on ne creuse que là où la piste creusée a elle aussi de l'énergie.
             if (masking) over = juce::jmin (over, tgtGrid[(size_t) j] - thr[(size_t) j]);
             over = RelationSettings::kneeCurve (over, rel.knee);   // seuil dur ou « soft »
-            inst[(size_t) j] = juce::jlimit (0.0f, maxC, over * amount * inten) * mk;
-            if (rel.resolution < 1.0f && lvl > -100.0f) rangePower += (double) (std::exp (lvl * 0.2302585093f) * mk);
-            maskSum += mk;
+            inst[(size_t) j] = juce::jlimit (0.0f, maxC, over * amount * inten);   // avant pondération par la zone
         }
 
-        // Résolution (de « large bande » à « spectral fin »), modulée par Détail low / high.
+        // Résolution : jusqu'où une réduction s'étale autour de l'endroit qui dépasse le seuil
+        // (modulée par Détail bas / haut). Au maximum, chaque bande est indépendante ; en baissant,
+        // la réduction déborde sur les fréquences voisines avec la même profondeur au centre ;
+        // au minimum, toute la zone est creusée autant que la bande qui dépasse le plus.
+        // Rien ne bouge si aucune bande ne dépasse le seuil.
         const float res = juce::jlimit (0.0f, 1.0f, rel.resolution);
         const float sigmaBase = 0.5f * (std::pow (2.0f, (1.0f - res) * 6.0f) - 1.0f) * (float) nb / 64.0f;
         {
@@ -631,34 +632,21 @@ void BreathAudioProcessor::controlTick (int64_t s, int syncDelay, bool offline)
             {
                 const float d = rel.detailLow + (rel.detailHigh - rel.detailLow) * detT[j];
                 const float sg = (sigmaBase + 0.5f) * std::exp2 (-2.0f * d) - 0.5f;
-                pj[(size_t) j] = sg > 0.01f ? std::exp (-1.0f / sg) : 0.0f;
+                pj[(size_t) j] = res <= 0.001f ? 1.0f : (sg > 0.01f ? std::exp (-1.0f / sg) : 0.0f);
                 any = any || pj[(size_t) j] > 0.0f;
             }
             if (any)
             {
-                std::array<float, kNumBands> a = inst, n = mask;
-                for (int j = 1; j < nb; ++j)       { const float p = pj[(size_t) j]; a[(size_t) j] += p * (a[(size_t) j - 1] - a[(size_t) j]); n[(size_t) j] += p * (n[(size_t) j - 1] - n[(size_t) j]); }
-                for (int j = nb - 2; j >= 0; --j)  { const float p = pj[(size_t) j]; a[(size_t) j] += p * (a[(size_t) j + 1] - a[(size_t) j]); n[(size_t) j] += p * (n[(size_t) j + 1] - n[(size_t) j]); }
-                for (int j = 0; j < nb; ++j)
-                    inst[(size_t) j] = n[(size_t) j] > 1.0e-6f ? a[(size_t) j] / n[(size_t) j] * mask[(size_t) j] : 0.0f;
+                // Étalement « par maximum » dans les deux sens (décroissance progressive autour des pics).
+                for (int j = 1; j < nb; ++j)
+                    if (mask[(size_t) j] > 0.0f)
+                        inst[(size_t) j] = juce::jmax (inst[(size_t) j], juce::jmin (curveMax[(size_t) j], inst[(size_t) j - 1] * pj[(size_t) j]));
+                for (int j = nb - 2; j >= 0; --j)
+                    if (mask[(size_t) j] > 0.0f)
+                        inst[(size_t) j] = juce::jmax (inst[(size_t) j], juce::jmin (curveMax[(size_t) j], inst[(size_t) j + 1] * pj[(size_t) j]));
             }
-        }
-
-        if (res < 1.0f && maskSum > 0.0)
-        {
-            const float lvlRange = (float) (10.0 * std::log10 (rangePower * (64.0 / nb) + 1.0e-14));
-            float meanThr = 0.0f;
-            for (int j = 0; j < nb; ++j) meanThr += thr[(size_t) j] * mask[(size_t) j];
-            meanThr /= (float) maskSum;
-            const float over = RelationSettings::kneeCurve (lvlRange - meanThr, rel.knee) * amount;
             for (int j = 0; j < nb; ++j)
-            {
-                if (mask[(size_t) j] <= 0.0f) continue;
-                float ov = over * curveInt[(size_t) j];
-                if (masking) ov = juce::jmin (ov, RelationSettings::kneeCurve (tgtGrid[(size_t) j] - thr[(size_t) j], rel.knee) * amount * curveInt[(size_t) j]);
-                const float bb = juce::jlimit (0.0f, curveMax[(size_t) j], ov);
-                inst[(size_t) j] = res * inst[(size_t) j] + (1.0f - res) * bb * mask[(size_t) j];
-            }
+                inst[(size_t) j] *= mask[(size_t) j];
         }
 
         // Attaque / release (avec tilt bas / haut), puis poids de transition et macro Breath.

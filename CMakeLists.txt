@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(Breath VERSION 0.3.0 LANGUAGES C CXX)
+project(Breath VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,11 +24,11 @@ FetchContent_MakeAvailable(JUCE)
 # --- Le plugin -------------------------------------------------------------
 juce_add_plugin(Breath
     COMPANY_NAME                "Breath"
-    BUNDLE_ID                   "com.breath.breath"
+    BUNDLE_ID                   "com.breath.breathone"
     PLUGIN_MANUFACTURER_CODE    Brth
-    PLUGIN_CODE                 Brt1
+    PLUGIN_CODE                 BrOn
     FORMATS                     VST3
-    PRODUCT_NAME                "Breath"
+    PRODUCT_NAME                "Breath One"
     IS_SYNTH                    FALSE
     NEEDS_MIDI_INPUT            FALSE
     NEEDS_MIDI_OUTPUT           FALSE
@@ -61,6 +61,8 @@ target_sources(Breath PRIVATE
     src/ui/SpectrumView.cpp
     src/ui/InstanceView.cpp
     src/ui/MatrixView.cpp
+    src/ui/EnsembleView.cpp
+    src/ui/TitleBar.cpp
 )
 
 target_compile_definitions(Breath PUBLIC

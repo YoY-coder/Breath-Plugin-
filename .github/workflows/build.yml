@@ -51,7 +51,7 @@ jobs:
         run: |
           Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
           Expand-Archive pluginval.zip -DestinationPath pluginval
-          $p = Start-Process -FilePath .\pluginval\pluginval.exe -ArgumentList '--strictness-level','10','--skip-gui-tests','--validate','build\Breath_artefacts\Release\VST3\Breath.vst3' -NoNewWindow -Wait -PassThru
+          $p = Start-Process -FilePath .\pluginval\pluginval.exe -ArgumentList '--strictness-level','10','--skip-gui-tests','--validate','"build\Breath_artefacts\Release\VST3\Breath One.vst3"' -NoNewWindow -Wait -PassThru
           Write-Host ("pluginval exit code: {0} (0x{0:X8})" -f $p.ExitCode)
           if ($p.ExitCode -ne 0) { exit 1 }
 
@@ -68,13 +68,13 @@ jobs:
         run: cmake --build build --config Release --target Breath_VST3 --parallel
 
       - name: Ad-hoc sign
-        run: codesign --force --deep --sign - build/Breath_artefacts/Release/VST3/Breath.vst3
+        run: codesign --force --deep --sign - "build/Breath_artefacts/Release/VST3/Breath One.vst3"
 
       - name: Check universal binary
-        run: lipo -info build/Breath_artefacts/Release/VST3/Breath.vst3/Contents/MacOS/Breath
+        run: lipo -info "build/Breath_artefacts/Release/VST3/Breath One.vst3/Contents/MacOS/Breath One"
 
       - name: Zip (keeps Mac permissions)
-        run: ditto -c -k --keepParent build/Breath_artefacts/Release/VST3/Breath.vst3 Breath-mac.zip
+        run: ditto -c -k --keepParent "build/Breath_artefacts/Release/VST3/Breath One.vst3" Breath-mac.zip
 
       - name: Upload plugin
         uses: actions/upload-artifact@v5
@@ -86,7 +86,7 @@ jobs:
         run: |
           curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
           unzip -q pluginval.zip
-          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process build/Breath_artefacts/Release/VST3/Breath.vst3
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --validate-in-process "build/Breath_artefacts/Release/VST3/Breath One.vst3"
 
   # Version publiée : quand le numéro de version (CMakeLists.txt) n'a encore jamais été publié,
   # on crée la version « VX.Y » dans l'onglet Releases, avec les fichiers Windows et Mac (gardés pour toujours).
@@ -122,8 +122,8 @@ jobs:
         if: steps.v.outputs.publish == 'true'
         run: |
           T="${{ steps.v.outputs.tag }}"
-          (cd artifacts/Breath-Windows && zip -qr "../../Breath-${T}-Windows.zip" Breath.vst3)
-          cp artifacts/Breath-macOS/Breath-mac.zip "Breath-${T}-macOS.zip"
+          (cd artifacts/Breath-Windows && zip -qr "../../Breath-One-${T}-Windows.zip" "Breath One.vst3")
+          cp artifacts/Breath-macOS/Breath-mac.zip "Breath-One-${T}-macOS.zip"
           ls -la *.zip
 
       - name: Create release
@@ -132,6 +132,6 @@ jobs:
         with:
           tag_name: ${{ steps.v.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: Breath ${{ steps.v.outputs.tag }}
+          name: Breath One ${{ steps.v.outputs.tag }}
           body_path: docs/release-notes/${{ steps.v.outputs.tag }}.md
-          files: Breath-V*.zip
+          files: Breath-One-V*.zip

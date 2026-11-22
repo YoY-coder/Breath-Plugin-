@@ -150,6 +150,11 @@ int main (int argc, char** argv)
     waitForKick();
     save (*editor, outDir.getChildFile ("ui-matrix.png"));
 
+    if (auto* ed = dynamic_cast<BreathAudioProcessorEditor*> (editor.get()))
+        ed->showView (2);
+    waitForKick();
+    save (*editor, outDir.getChildFile ("ui-ensemble.png"));
+
     // Petite taille (vérifie le redimensionnement)
     editor->setSize (600, 373);
     juce::MessageManager::getInstance()->runDispatchLoopUntil (200);

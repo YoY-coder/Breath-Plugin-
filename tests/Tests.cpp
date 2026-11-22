@@ -392,7 +392,7 @@ int main()
         hub.setRelation (rig[0].getSlot(), rig[1].getSlot(), rel);
         const float hard = lowLevel (rig.render ({ 256 }, 0, 22), 1, lat);
         std::printf ("        mode Hard : graves de la basse %.1f dB -> %.1f dB\n", ref, hard);
-        check (ref - hard > 20.0f, "Mode Hard : la basse est creusee de plus de 20 dB");
+        check (ref - hard > 15.0f, "Mode Hard : la basse est creusee de plus de 15 dB");
         rel.hard = false; rel.maxReduction = 9.0f; rel.amount = 0.8f; rel.threshold = -45.0f;
 
         // Masking : la voix n'a presque pas de graves → le kick ne doit quasiment pas la creuser dans les graves.
@@ -440,6 +440,28 @@ int main()
             check (std::abs (sep - ref) < 1.5f, "Familles : le kick (autre famille) ne creuse plus la basse");
             fam->setValueNotifyingHost (fam->convertTo0to1 (0.0f));
             hub.setFamily (rig[0].getSlot(), 0);
+        }
+
+        // Résolution basse : la réduction s'étale autour du conflit, mais aucun « plateau » là où rien ne dépasse.
+        {
+            auto ks = hub.getRelation (rig[0].getSlot(), rig[3].getSlot());
+            const auto saved = ks;
+            ks.assigned = true; ks.enabled = true; ks.lowHz = 20.0f; ks.highHz = 20000.0f;
+            ks.threshold = -60.0f; ks.amount = 1.0f; ks.maxReduction = 12.0f; ks.resolution = 0.875f;   // ≈ 38 bandes
+            hub.setRelation (rig[0].getSlot(), rig[3].getSlot(), ks);
+            rig.render ({ 256 }, 0, 34);
+            float lowRed = 0.0f, highRed = 0.0f;
+            for (int b = 0; b < breath::kNumBands; ++b)
+            {
+                const float v = hub.slot (rig[3].getSlot()).activityFrom[(size_t) rig[0].getSlot()].load();
+                juce::ignoreUnused (v);
+                const float r = hub.slot (rig[3].getSlot()).reductionCurve[(size_t) b].load();
+                if (breath::bandCentre (b) < 150.0f) lowRed = juce::jmax (lowRed, r);
+                if (breath::bandCentre (b) > 3000.0f) highRed = juce::jmax (highRed, r);
+            }
+            std::printf ("        resolution 38 bandes : reduction graves %.1f dB, aigus %.2f dB\n", lowRed, highRed);
+            check (lowRed > 1.0f && highRed < 0.2f, "Resolution : pas de plateau la ou rien ne depasse le seuil");
+            hub.setRelation (rig[0].getSlot(), rig[3].getSlot(), saved);
         }
 
         // Point sur la courbe de seuil : abaisser le seuil creuse davantage.

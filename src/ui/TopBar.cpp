@@ -129,11 +129,11 @@ namespace breath::ui
         familyBtn.setBounds (r.removeFromLeft (26).withSizeKeepingCentre (26, 26));
         r.removeFromLeft (10);
         dotX = (float) r.getX();
-        auto left = r.removeFromLeft (170);
+        auto left = r.removeFromLeft (160);
         left.removeFromLeft (16);
         name.setBounds (left.withSizeKeepingCentre (left.getWidth() - 34, 26).withX (left.getX() - 4));
 
-        views.setBounds (r.removeFromLeft (156).withSizeKeepingCentre (156, 28));
+        views.setBounds (r.removeFromLeft (210).withSizeKeepingCentre (210, 28));
 
         auto right = r;
         bypassAll.setBounds (right.removeFromRight (74).withSizeKeepingCentre (74, 26));
