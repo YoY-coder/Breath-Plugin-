@@ -58,3 +58,5 @@ Liste tenue à jour au fil des retours. Rien de ce qui est ici n'est encore cod�
 - [x] (V0.4) Résolution : plus de plateau quand rien ne dépasse le seuil (étalement « par maximum »).
 - [x] (V0.4) Titre « BREATH ONE » (style logo DROZ Recordz), fenêtre 15 % plus grande, onglet « Ensemble ».
 - [ ] Onglet Ensemble : régler aussi les réglages propres à chaque piste (Dry/Wet, Make-up, Stéréo…).
+- [ ] **Courbe de réduction = vraie réponse des filtres** (calculée à partir des cloches, comme un EQ) au lieu des
+      valeurs par bande recopiées (« escaliers » en 64 bandes). Affichage seulement, aucun effet sur le son.
