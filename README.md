@@ -16,7 +16,7 @@ chaque piste « creuse » les pistes situées en dessous d'elle, uniquement là 
 
 Onglet **Actions** du dépôt → dernière ligne **« Build »** avec une coche verte → section **Artifacts** :
 
-Le plus simple : onglet **Releases** du dépôt → dernière version → `Breath-One-VX.Y-Windows.zip` ou `-macOS.zip`
+Le plus simple : onglet **Releases** du dépôt → dernière version **Breath One VX.Y** → `Breath-One-VX.Y-Windows.zip` ou `-macOS.zip`
 (binaire universel Apple Silicon + Intel). Le plugin s'appelle `Breath One.vst3`.
 
 ## 2. Installer

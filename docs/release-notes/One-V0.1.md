@@ -1,4 +1,4 @@
-## Breath One — nouveau plugin
+## Breath One V0.1 — nouveau plugin (numérotation repartie de zéro)
 À partir de cette version, le plugin s'appelle **Breath One** et a sa propre identité dans Ableton.
 L'ancien **Breath** (V0.3) n'est plus modifié : vos projets existants continuent de l'utiliser sans aucun changement.
 Les deux s'installent côte à côte (`Breath.vst3` et `Breath One.vst3`) mais ne se voient pas entre eux :
@@ -15,7 +15,7 @@ n'utilisez qu'un seul des deux dans un même projet.
 - **Fenêtre 15 % plus grande** à la première ouverture (la taille choisie reste mémorisée).
 
 ## Installation
-- **Windows** : dézipper `Breath-One-V0.4-Windows.zip`, copier `Breath One.vst3` dans `C:\Program Files\Common Files\VST3\`.
-- **Mac** : dézipper `Breath-One-V0.4-macOS.zip`, copier `Breath One.vst3` dans `~/Library/Audio/Plug-Ins/VST3/`, puis dans le Terminal :
+- **Windows** : dézipper `Breath-One-V0.1-Windows.zip`, copier `Breath One.vst3` dans `C:\Program Files\Common Files\VST3\`.
+- **Mac** : dézipper `Breath-One-V0.1-macOS.zip`, copier `Breath One.vst3` dans `~/Library/Audio/Plug-Ins/VST3/`, puis dans le Terminal :
   `xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Breath One.vst3"`
 - Ableton : *Préférences → Plug-ins → Rescan*. Le plugin apparaît sous le nom **Breath One**.

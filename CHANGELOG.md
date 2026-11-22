@@ -1,16 +1,21 @@
-# Journal des versions de Breath / Breath One
+# Journal des versions
+
+**Breath One** (nouveau plugin, numérotation propre, étiquettes « One-VX.Y ») — puis plus bas l'ancien **Breath** (V0.1–V0.3, figé).
 
 Chaque version est téléchargeable pour toujours dans l'onglet **Releases** du dépôt
 (publiée automatiquement quand le numéro de version change).
 Les projets enregistrés avec une version sont relus par les versions suivantes.
 Quand une version **change le son** à réglages identiques, c'est indiqué par ⚠️.
 
-## V0.4 — Breath One (nouveau plugin)
+## Breath One V0.1 (nouveau plugin)
 - Nouveau nom et nouvelle identité : **Breath One**. L'ancien Breath reste figé en V0.3 pour les projets existants.
 - ⚠️ (par rapport à Breath) **Résolution** : plus de plateau quand rien ne dépasse le seuil ; la réduction s'étale
   seulement autour des endroits qui dépassent.
 - Onglet **Ensemble** : toutes les instances en direct, réglables depuis un seul plugin.
 - Titre « BREATH ONE » dans le style du logo DROZ Recordz, fenêtre 15 % plus grande à l'ouverture.
+
+---
+# Ancien Breath (figé)
 
 ## V0.3
 - Automation : Quantité et seuil global de chaque relation (emplacements Self + 8 sources nommés d'après la source).
